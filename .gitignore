@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+.env.generated
+
+# 数据目录
+data/
+logs/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Chroma 向量库
+chroma_db/
+chroma_db_*/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# MacOS
+.DS_Store
+
+# 备份文件
+*.bak
+*.backup
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+
