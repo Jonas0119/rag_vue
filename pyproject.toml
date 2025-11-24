@@ -33,7 +33,8 @@ supabase = "^2.0.0"
 psycopg2-binary = "^2.9.9"
 # Pinecone 依赖（VECTOR_DB_MODE=cloud 时需要）
 # 使用最新版本 langchain-pinecone 0.2.x（兼容 langchain-core 1.0.0）
-pinecone-client = "^6.0.0"
+# 注意：Pinecone 官方包已重命名，从 pinecone-client 改为 pinecone
+pinecone = "^6.0.0"
 langchain-pinecone = "^0.2.13"
 
 [build-system]
