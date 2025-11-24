@@ -18,30 +18,55 @@ _original_getaddrinfo = socket.getaddrinfo
 
 def _ipv4_getaddrinfo(*args, **kwargs):
     """强制使用 IPv4 的 getaddrinfo"""
-    responses = _original_getaddrinfo(*args, **kwargs)
-    # 过滤掉 IPv6 地址，只返回 IPv4
-    return [r for r in responses if r[0] == socket.AF_INET]
+    try:
+        responses = _original_getaddrinfo(*args, **kwargs)
+        # 过滤掉 IPv6 地址，只返回 IPv4
+        ipv4_responses = [r for r in responses if r[0] == socket.AF_INET]
+        
+        # 如果没有 IPv4 地址，记录警告但返回原始响应（让系统处理）
+        if not ipv4_responses:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"DNS 解析未返回 IPv4 地址，主机: {args[0] if args else 'unknown'}。"
+                f"返回了 {len(responses)} 个地址，但都是 IPv6。"
+                f"这可能导致连接失败。"
+            )
+            # 如果确实没有 IPv4，返回原始响应（可能包含 IPv6，但至少不会因为空列表而失败）
+            # 在实际情况下，大多数服务都同时提供 IPv4 和 IPv6
+            return responses
+        
+        return ipv4_responses
+    except Exception as e:
+        # 如果出错，回退到原始函数
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"IPv4 过滤失败，使用原始 getaddrinfo: {str(e)}")
+        return _original_getaddrinfo(*args, **kwargs)
 
-# 在 Streamlit Cloud 环境中，强制使用 IPv4
+# 在所有情况下强制使用 IPv4（解决 Streamlit Cloud IPv6 连接问题）
 # 注意：这会影响所有 socket 连接，但可以解决 PostgreSQL 连接问题
 # 由于 Streamlit Cloud 不支持 IPv6，我们总是强制使用 IPv4
+# 本地环境通常也支持 IPv4，所以这个修改是安全的
 try:
-    # 检查是否在 Streamlit Cloud 环境
-    # Streamlit Cloud 的环境变量：
-    # - STREAMLIT_SERVER_PORT: 通常存在
-    # - 或者检查路径是否包含 /mount/src（Streamlit Cloud 的挂载路径）
-    is_streamlit_cloud = (
-        os.getenv("STREAMLIT_SERVER_PORT") or 
-        os.getenv("STREAMLIT_SHARING_MODE") or
-        "/mount/src" in os.path.abspath(__file__) if "__file__" in globals() else False
-    )
-    
-    # 在 Streamlit Cloud 或检测到 IPv6 问题时，强制使用 IPv4
-    # 为了安全起见，我们总是启用 IPv4 强制（因为本地环境通常也支持 IPv4）
+    # 立即替换，不检查环境（因为总是强制 IPv4 是安全的）
     socket.getaddrinfo = _ipv4_getaddrinfo
-except Exception:
-    # 如果设置失败，不影响其他功能
-    pass
+    
+    # 记录日志（如果可能）
+    try:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug("已启用 IPv4 强制模式（过滤 IPv6 地址）")
+    except:
+        pass
+except Exception as e:
+    # 如果设置失败，记录错误但不影响其他功能
+    import logging
+    try:
+        logger = logging.getLogger(__name__)
+        logger.warning(f"无法设置 IPv4 强制模式: {str(e)}")
+    except:
+        pass
 
 # PostgreSQL 相关导入（可选）
 try:
@@ -98,40 +123,81 @@ class DatabaseManager:
         finally:
             conn.close()
     
+    def _resolve_hostname_to_ipv4(self, hostname: str) -> Optional[str]:
+        """
+        解析主机名为 IPv4 地址
+        
+        返回 IPv4 地址字符串，如果解析失败返回 None
+        """
+        try:
+            # 使用 socket.getaddrinfo 解析，显式指定只获取 IPv4 地址
+            # 注意：我们已经全局替换了 getaddrinfo 为只返回 IPv4 的版本
+            # 但这里显式指定 family=socket.AF_INET 以确保只获取 IPv4
+            results = _original_getaddrinfo(hostname, None, socket.AF_INET, socket.SOCK_STREAM)
+            if results:
+                # 获取第一个 IPv4 地址
+                ipv4_address = results[0][4][0]
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"主机名 {hostname} 解析为 IPv4 地址: {ipv4_address}")
+                return ipv4_address
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"无法解析主机名 {hostname} 为 IPv4 地址: {str(e)}")
+        return None
+    
     def _normalize_database_url(self, database_url: str) -> str:
         """
         规范化数据库连接 URL，解决 IPv6 连接问题
         
         Streamlit Cloud 可能不支持 IPv6，需要：
-        1. 如果 URL 中包含 IPv6 地址，尝试提取主机名
+        1. 手动解析主机名为 IPv4 地址，使用 IP 地址连接
         2. 添加连接参数优化连接
         """
         try:
             # 解析 URL
             parsed = urlparse(database_url)
-            
-            # 检查是否是 IPv6 地址格式
             hostname = parsed.hostname
-            if hostname and ':' in hostname and not hostname.startswith('['):
-                # 可能是 IPv6 地址，尝试从 netloc 中提取主机名
-                # Supabase 的 DATABASE_URL 格式通常是：
-                # postgresql://postgres:password@db.project-ref.supabase.co:5432/postgres
-                # 如果 netloc 包含 IPv6，尝试使用主机名部分
-                netloc_parts = parsed.netloc.split('@')
-                if len(netloc_parts) == 2:
-                    # 有用户名密码部分
-                    auth_part = netloc_parts[0]
-                    host_part = netloc_parts[1]
-                    # 提取主机名（去掉端口）
-                    if ':' in host_part:
-                        host, port = host_part.rsplit(':', 1)
-                        # 如果 host 是 IPv6，尝试从原始 URL 中提取主机名
-                        # 或者使用主机名（如果 DATABASE_URL 中包含）
-                        # 这里我们保持原样，但添加连接参数
-                        pass
+            
+            # 如果主机名是域名（不是 IP 地址），尝试解析为 IPv4
+            ipv4_address = None
+            if hostname and not self._is_ip_address(hostname):
+                # 尝试解析为 IPv4 地址
+                ipv4_address = self._resolve_hostname_to_ipv4(hostname)
+            
+            # 构建新的 netloc
+            netloc_parts = parsed.netloc.split('@')
+            if len(netloc_parts) == 2:
+                # 有用户名密码部分
+                auth_part = netloc_parts[0]
+                host_part = netloc_parts[1]
+                
+                # 提取端口
+                if ':' in host_part:
+                    _, port = host_part.rsplit(':', 1)
+                else:
+                    port = '5432'  # 默认 PostgreSQL 端口
+                
+                # 如果成功解析到 IPv4 地址，使用 IP 地址替换主机名
+                if ipv4_address:
+                    new_netloc = f"{auth_part}@{ipv4_address}:{port}"
+                else:
+                    # 解析失败，保持原样（但会添加连接参数）
+                    new_netloc = parsed.netloc
+            else:
+                # 没有用户名密码部分（不太可能，但处理一下）
+                if ':' in parsed.netloc:
+                    _, port = parsed.netloc.rsplit(':', 1)
+                else:
+                    port = '5432'
+                
+                if ipv4_address:
+                    new_netloc = f"{ipv4_address}:{port}"
+                else:
+                    new_netloc = parsed.netloc
             
             # 添加连接参数：增加超时时间，优化连接
-            query_params = []
             if parsed.query:
                 # 解析现有查询参数
                 from urllib.parse import parse_qs, urlencode
@@ -158,7 +224,7 @@ class DatabaseManager:
             # 重建 URL
             normalized_url = urlunparse((
                 parsed.scheme,
-                parsed.netloc,  # 保持原始主机名和端口
+                new_netloc,  # 使用新的 netloc（可能包含 IPv4 地址）
                 parsed.path,
                 parsed.params,
                 new_query,
@@ -172,6 +238,20 @@ class DatabaseManager:
             logger = logging.getLogger(__name__)
             logger.warning(f"数据库 URL 规范化失败，使用原始 URL: {str(e)}")
             return database_url
+    
+    def _is_ip_address(self, host: str) -> bool:
+        """检查字符串是否是 IP 地址（IPv4 或 IPv6）"""
+        try:
+            # 尝试解析为 IPv4
+            socket.inet_aton(host)
+            return True
+        except socket.error:
+            try:
+                # 尝试解析为 IPv6
+                socket.inet_pton(socket.AF_INET6, host)
+                return True
+            except socket.error:
+                return False
     
     def _init_connection_pool(self):
         """初始化 PostgreSQL 连接池"""

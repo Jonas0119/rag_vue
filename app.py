@@ -1,6 +1,28 @@
 """
 RAG 智能问答系统 - 主应用
 """
+# ==================== IPv4 强制（必须在所有导入之前）====================
+# 解决 Streamlit Cloud IPv6 连接问题
+# 必须在导入任何可能使用 socket 的模块之前执行
+import socket
+_original_getaddrinfo = socket.getaddrinfo
+
+def _ipv4_getaddrinfo(*args, **kwargs):
+    """强制使用 IPv4 的 getaddrinfo（解决 Streamlit Cloud IPv6 问题）"""
+    try:
+        responses = _original_getaddrinfo(*args, **kwargs)
+        # 过滤掉 IPv6 地址，只返回 IPv4
+        ipv4_responses = [r for r in responses if r[0] == socket.AF_INET]
+        # 如果没有 IPv4 地址但有其他地址，返回原始响应（让系统处理）
+        return ipv4_responses if ipv4_responses else responses
+    except Exception:
+        # 如果出错，回退到原始函数
+        return _original_getaddrinfo(*args, **kwargs)
+
+# 立即替换，确保所有后续的 socket 操作都使用 IPv4
+socket.getaddrinfo = _ipv4_getaddrinfo
+# ==================== IPv4 强制结束 ====================
+
 import streamlit as st
 import os
 import logging
