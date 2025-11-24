@@ -3,6 +3,7 @@
 """
 import sqlite3
 import os
+import socket
 from pathlib import Path
 from typing import Optional, Union
 from contextlib import contextmanager
@@ -10,6 +11,37 @@ from urllib.parse import urlparse, urlunparse
 
 from utils.config import config
 from utils.performance_monitor import monitor_database
+
+# 强制使用 IPv4（解决 Streamlit Cloud IPv6 连接问题）
+# 保存原始的 getaddrinfo 函数
+_original_getaddrinfo = socket.getaddrinfo
+
+def _ipv4_getaddrinfo(*args, **kwargs):
+    """强制使用 IPv4 的 getaddrinfo"""
+    responses = _original_getaddrinfo(*args, **kwargs)
+    # 过滤掉 IPv6 地址，只返回 IPv4
+    return [r for r in responses if r[0] == socket.AF_INET]
+
+# 在 Streamlit Cloud 环境中，强制使用 IPv4
+# 注意：这会影响所有 socket 连接，但可以解决 PostgreSQL 连接问题
+# 由于 Streamlit Cloud 不支持 IPv6，我们总是强制使用 IPv4
+try:
+    # 检查是否在 Streamlit Cloud 环境
+    # Streamlit Cloud 的环境变量：
+    # - STREAMLIT_SERVER_PORT: 通常存在
+    # - 或者检查路径是否包含 /mount/src（Streamlit Cloud 的挂载路径）
+    is_streamlit_cloud = (
+        os.getenv("STREAMLIT_SERVER_PORT") or 
+        os.getenv("STREAMLIT_SHARING_MODE") or
+        "/mount/src" in os.path.abspath(__file__) if "__file__" in globals() else False
+    )
+    
+    # 在 Streamlit Cloud 或检测到 IPv6 问题时，强制使用 IPv4
+    # 为了安全起见，我们总是启用 IPv4 强制（因为本地环境通常也支持 IPv4）
+    socket.getaddrinfo = _ipv4_getaddrinfo
+except Exception:
+    # 如果设置失败，不影响其他功能
+    pass
 
 # PostgreSQL 相关导入（可选）
 try:
