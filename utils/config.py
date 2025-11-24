@@ -1,11 +1,59 @@
 """
 配置管理
+兼容本地运行和 Streamlit Cloud 部署
+
+环境变量加载优先级：
+1. 系统环境变量（Streamlit Cloud Secrets）
+2. .env 文件（本地开发）
+3. 默认值
 """
 import os
 from dotenv import load_dotenv
 
 # 加载环境变量
-load_dotenv()
+# 本地运行：从 .env 文件加载
+# Streamlit Cloud：从 Secrets 加载（.env 不存在时静默失败）
+load_dotenv(override=False)  # override=False 确保环境变量优先级：系统环境变量 > .env 文件
+
+# 在 Streamlit Cloud 中，Secrets 会自动加载到 st.secrets
+# 这里将 st.secrets 中的值合并到环境变量（如果存在）
+# 注意：此代码在模块导入时执行，此时 Streamlit 可能还未初始化
+# 因此使用延迟加载，在首次访问时再尝试加载 Secrets
+def _load_streamlit_secrets():
+    """
+    延迟加载 Streamlit Secrets
+    
+    在 Streamlit Cloud 中，Secrets 会自动加载到 st.secrets
+    本地开发时，如果 .streamlit/secrets.toml 不存在，会抛出 StreamlitSecretNotFoundError
+    这里捕获该异常，确保本地开发时不会因为缺少 secrets 文件而失败
+    """
+    try:
+        import streamlit as st
+        from streamlit.errors import StreamlitSecretNotFoundError
+        
+        # 检查 secrets 是否存在且可用
+        if hasattr(st, 'secrets'):
+            try:
+                # 尝试访问 secrets，如果文件不存在会抛出 StreamlitSecretNotFoundError
+                # 使用 len() 来触发 secrets 的解析，如果文件不存在会立即抛出异常
+                _ = len(st.secrets)
+                # 如果成功，说明 secrets 存在，可以安全地遍历
+                for key, value in st.secrets.items():
+                    if key not in os.environ:  # 不覆盖已存在的环境变量
+                        os.environ[key] = str(value)
+            except StreamlitSecretNotFoundError:
+                # secrets 文件不存在，这是正常的（本地开发时使用 .env 文件）
+                # 静默忽略，不影响应用启动
+                pass
+            except Exception:
+                # 其他可能的异常（如 RuntimeError），忽略
+                pass
+    except (ImportError, RuntimeError, AttributeError):
+        # 如果不在 Streamlit 环境中或 streamlit 模块不可用，忽略错误
+        pass
+
+# 尝试加载 Streamlit Secrets（如果可用）
+_load_streamlit_secrets()
 
 
 class Config:

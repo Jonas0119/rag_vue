@@ -278,6 +278,7 @@ class DatabaseManager:
                 logger = logging.getLogger(__name__)
                 logger.warning(f"归还连接到池失败: {str(e)}")
                 # 提供更友好的错误提示
+                error_msg = str(e).lower()
                 if "could not translate host name" in error_msg or "nodename nor servname" in error_msg:
                     raise ConnectionError(
                         f"无法连接到 Supabase PostgreSQL 数据库。\n"
