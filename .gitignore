@@ -54,3 +54,6 @@ tmp/
 temp/
 *.tmp
 
+frontend/node_modules
+backend/venv
+backend/.env

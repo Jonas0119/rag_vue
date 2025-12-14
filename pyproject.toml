@@ -18,14 +18,27 @@ langchain-chroma = "^1.0.0"
 pypdf = "^6.2.0"
 sentence-transformers = "^5.1.2"
 langchain-huggingface = "^1.0.1"
+langgraph = "^1.0.0"
+langgraph-checkpoint-sqlite = "^2.0.11"  # 需要 >=2.0.11 以兼容 langgraph-checkpoint >=2.1.0
 tenacity = "^9.1.2"
-streamlit = "^1.51.0"
 bcrypt = "^5.0.0"
 pyjwt = "^2.10.1"
 python-docx = "^1.2.0"
 python-dotenv = "^1.2.1"
 python-multipart = "^0.0.20"
-streamlit-cookies-controller = "^0.0.4"
+# FastAPI 相关依赖
+fastapi = "^0.115.0"
+uvicorn = {extras = ["standard"], version = "^0.32.0"}
+mangum = "^0.18.0"  # Vercel Serverless Functions 适配器
+pydantic = {extras = ["email"], version = "^2.9.0"}
+pydantic-settings = "^2.5.0"
+email-validator = ">=2.1.0"
+# 中文分词支持（用于 BM25 检索器）
+jieba = "^0.42.1"
+# BM25 检索器依赖（用于 HybridRetriever）
+rank-bm25 = "^0.2.2"
+# ModelScope SDK（用于从 ModelScope 下载模型）
+modelscope = "^1.9.0"
 # ===== 云服务依赖（可选，仅在 cloud 模式下需要）=====
 # Supabase Storage 依赖（STORAGE_MODE=cloud 时需要）
 supabase = "^2.0.0"
