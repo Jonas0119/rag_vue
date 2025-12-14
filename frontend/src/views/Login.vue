@@ -131,114 +131,172 @@ async function handleSubmit() {
   align-items: center;
   min-height: 100vh;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 20px;
+  padding: var(--spacing-xl);
 }
 
 .login-card {
-  background: white;
-  border-radius: 12px;
-  padding: 40px;
+  background: var(--color-bg-primary);
+  border-radius: var(--radius-xl);
+  padding: var(--spacing-3xl);
   width: 100%;
   max-width: 400px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-lg);
+  animation: slideUp var(--transition-slow);
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .title {
   text-align: center;
-  margin-bottom: 30px;
-  color: #333;
+  margin-bottom: var(--spacing-3xl);
+  color: var(--color-text-primary);
   font-size: 28px;
   font-weight: 600;
 }
 
 .tabs {
   display: flex;
-  gap: 10px;
-  margin-bottom: 30px;
-  border-bottom: 2px solid #f0f0f0;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-3xl);
+  border-bottom: 2px solid var(--color-border);
 }
 
 .tab {
   flex: 1;
-  padding: 12px;
+  padding: var(--spacing-md);
   background: none;
   border: none;
   cursor: pointer;
   font-size: 16px;
-  color: #666;
+  color: var(--color-text-secondary);
   border-bottom: 2px solid transparent;
   margin-bottom: -2px;
-  transition: all 0.3s;
+  transition: all var(--transition-base);
+  font-weight: 500;
+}
+
+.tab:hover {
+  color: var(--color-primary);
 }
 
 .tab.active {
-  color: #667eea;
-  border-bottom-color: #667eea;
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
   font-weight: 600;
 }
 
 .form {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--spacing-xl);
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--spacing-sm);
 }
 
 .form-group label {
   font-size: 14px;
   font-weight: 500;
-  color: #333;
+  color: var(--color-text-primary);
 }
 
 .form-group input {
-  padding: 12px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
+  padding: var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   font-size: 14px;
-  transition: border-color 0.3s;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  transition: all var(--transition-base);
 }
 
 .form-group input:focus {
   outline: none;
-  border-color: #667eea;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
 .form-group input:disabled {
-  background: #f5f5f5;
+  background: var(--color-bg-secondary);
   cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .error-message {
-  padding: 12px;
-  background: #fee;
-  color: #c33;
-  border-radius: 6px;
+  padding: var(--spacing-md);
+  background: rgba(229, 62, 62, 0.1);
+  color: var(--color-danger);
+  border-radius: var(--radius-md);
   font-size: 14px;
+  border: 1px solid rgba(229, 62, 62, 0.2);
 }
 
 .submit-btn {
-  padding: 14px;
-  background: #667eea;
+  min-height: 44px;
+  padding: var(--spacing-md);
+  background: var(--color-primary);
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.3s;
+  transition: all var(--transition-base);
 }
 
 .submit-btn:hover:not(:disabled) {
-  background: #5568d3;
+  background: var(--color-primary-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.submit-btn:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .submit-btn:disabled {
-  background: #ccc;
+  background: var(--color-border);
   cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* 移动端响应式 */
+@media (max-width: 768px) {
+  .login-container {
+    padding: var(--spacing-md);
+  }
+
+  .login-card {
+    padding: var(--spacing-xl);
+  }
+
+  .title {
+    font-size: 24px;
+    margin-bottom: var(--spacing-xl);
+  }
+
+  .tabs {
+    margin-bottom: var(--spacing-xl);
+  }
+
+  .form {
+    gap: var(--spacing-lg);
+  }
+
+  .form-group input {
+    font-size: 16px; /* 防止iOS自动缩放 */
+  }
 }
 </style>

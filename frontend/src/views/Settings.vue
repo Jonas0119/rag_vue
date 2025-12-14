@@ -75,89 +75,164 @@ function formatDate(dateString?: string): string {
 
 <style scoped>
 .settings-container {
-  padding: 20px;
+  padding: var(--spacing-xl);
   max-width: 1200px;
   margin: 0 auto;
+  min-height: 100vh;
 }
 
 .settings-header {
-  margin-bottom: 30px;
+  margin-bottom: var(--spacing-3xl);
 }
 
 .settings-header h1 {
   margin: 0;
   font-size: 24px;
-  color: #2d3748;
+  font-weight: 600;
+  color: var(--color-text-primary);
 }
 
 .settings-content {
   display: flex;
   flex-direction: column;
-  gap: 30px;
+  gap: var(--spacing-3xl);
 }
 
 .settings-section {
-  background: white;
-  padding: 24px;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
+  background: var(--color-bg-primary);
+  padding: var(--spacing-2xl);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-base);
+}
+
+.settings-section:hover {
+  box-shadow: var(--shadow-md);
 }
 
 .settings-section h2 {
-  margin: 0 0 20px 0;
+  margin: 0 0 var(--spacing-xl) 0;
   font-size: 18px;
-  color: #2d3748;
+  font-weight: 600;
+  color: var(--color-text-primary);
 }
 
 .info-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
+  gap: var(--spacing-xl);
 }
 
 .info-item {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--spacing-sm);
 }
 
 .info-item label {
   font-size: 14px;
   font-weight: 500;
-  color: #4a5568;
+  color: var(--color-text-secondary);
 }
 
 .info-item input {
-  padding: 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
+  padding: var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   font-size: 14px;
-  background: #f7fafc;
-  color: #666;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  transition: all var(--transition-base);
+}
+
+.info-item input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1);
 }
 
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
+  gap: var(--spacing-xl);
 }
 
 .stat-item {
   text-align: center;
-  padding: 20px;
-  background: #f7fafc;
-  border-radius: 8px;
+  padding: var(--spacing-xl);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  transition: all var(--transition-base);
+}
+
+.stat-item:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 
 .stat-value {
   font-size: 32px;
   font-weight: 600;
-  color: #4299e1;
-  margin-bottom: 8px;
+  color: var(--color-primary);
+  margin-bottom: var(--spacing-sm);
+  line-height: 1.2;
 }
 
 .stat-label {
   font-size: 14px;
-  color: #666;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+/* 移动端响应式 */
+@media (max-width: 768px) {
+  .settings-container {
+    padding: var(--spacing-md);
+  }
+
+  .settings-header {
+    margin-bottom: var(--spacing-xl);
+  }
+
+  .settings-header h1 {
+    font-size: 20px;
+  }
+
+  .settings-content {
+    gap: var(--spacing-xl);
+  }
+
+  .settings-section {
+    padding: var(--spacing-lg);
+  }
+
+  .info-grid {
+    grid-template-columns: 1fr;
+    gap: var(--spacing-lg);
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+    gap: var(--spacing-lg);
+  }
+
+  .stat-item {
+    padding: var(--spacing-lg);
+  }
+
+  .stat-value {
+    font-size: 28px;
+  }
+}
+
+/* 平板端 */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 </style>
