@@ -499,6 +499,7 @@ async function handleDelete(docId: string) {
 
   .documents-header {
     margin-bottom: var(--spacing-xl);
+    padding-left: 72px; /* 为菜单按钮留出空间（16px + 44px + 12px间距），只影响标题区域 */
   }
 
   .documents-header h1 {

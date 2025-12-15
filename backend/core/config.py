@@ -29,6 +29,9 @@ class Settings:
         "http://127.0.0.1:3000",
     ]
     
+    # 开发模式：允许所有源（用于局域网访问）
+    CORS_ALLOW_ALL: bool = os.getenv("CORS_ALLOW_ALL", "true").lower() == "true"
+    
     # 认证配置
     AUTH_COOKIE_NAME: str = os.getenv("AUTH_COOKIE_NAME", "rag_auth_token")
     AUTH_COOKIE_KEY: str = os.getenv("AUTH_COOKIE_KEY", "default_secret_key")
@@ -49,6 +52,10 @@ class Settings:
     @classmethod
     def get_cors_origins(cls) -> list:
         """获取 CORS 允许的源"""
+        # 开发模式：允许所有源（用于局域网访问）
+        if cls.CORS_ALLOW_ALL:
+            return ["*"]
+        
         # 从环境变量读取额外的 CORS 源
         extra_origins = os.getenv("CORS_ORIGINS", "")
         if extra_origins:

@@ -369,7 +369,7 @@ class RAGService:
                         "step": current_step,
                         "action": "分析问题",
                         "description": "生成查询或判断是否需要检索",
-                        "details": "进入 LangGraph RAG 工作流"
+                        "details": " 判断是否文档检索 "
                     })
                     current_step += 1
                 

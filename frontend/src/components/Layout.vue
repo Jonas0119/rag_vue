@@ -72,7 +72,7 @@
             v-for="session in chatStore.sessions"
             :key="session.session_id"
             :class="['session-item', { active: chatStore.currentSessionId === session.session_id }]"
-            @click="chatStore.selectSession(session.session_id)"
+            @click="handleSessionClick(session.session_id)"
           >
             <div class="session-title">{{ session.title }}</div>
             <div class="session-meta">
@@ -113,9 +113,19 @@ function closeMenuOnMobile() {
   }
 }
 
+function handleSessionClick(sessionId: string) {
+  chatStore.selectSession(sessionId)
+  // 在移动端点击会话项时关闭菜单
+  closeMenuOnMobile()
+}
+
 // 监听窗口大小变化，在桌面端自动打开菜单
 function handleResize() {
   if (window.innerWidth >= 768) {
+    // 桌面端：侧边栏始终可见，保持状态一致性
+    isMenuOpen.value = true
+  } else {
+    // 移动端：默认关闭菜单
     isMenuOpen.value = false
   }
 }
@@ -399,6 +409,11 @@ async function handleLogout() {
 
   .sidebar.sidebar-open {
     transform: translateX(0);
+  }
+
+  /* 为关闭按钮留出空间，避免遮挡标题 */
+  .sidebar-header {
+    padding-top: 76px; /* 16px (top) + 44px (button) + 16px (spacing) */
   }
 
   .main-content {

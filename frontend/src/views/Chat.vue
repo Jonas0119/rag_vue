@@ -143,17 +143,12 @@ watch(() => chatStore.messages.length, () => {
   height: 100vh;
   max-width: 1200px;
   margin: 0 auto;
-  background: var(--color-bg-primary);
+  background: var(--color-bg-secondary);
+  padding: var(--spacing-xl);
 }
 
 .chat-header {
-  padding: var(--spacing-xl);
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-primary);
-  box-shadow: var(--shadow-sm);
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  margin-bottom: var(--spacing-3xl);
 }
 
 .chat-header h1 {
@@ -166,11 +161,10 @@ watch(() => chatStore.messages.length, () => {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: var(--spacing-xl);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-xl);
-  background: var(--color-bg-secondary);
+  margin-bottom: var(--spacing-xl);
 }
 
 .message {
@@ -415,15 +409,21 @@ summary:hover {
 }
 
 .send-btn:disabled {
-  background: var(--color-border);
+  background: #cbd5e0;
+  color: #718096;
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 1;
 }
 
 /* 移动端响应式 */
 @media (max-width: 768px) {
+  .chat-container {
+    padding: var(--spacing-md);
+  }
+
   .chat-header {
-    padding: var(--spacing-md) var(--spacing-lg);
+    margin-bottom: var(--spacing-xl);
+    padding-left: 72px; /* 为菜单按钮留出空间（16px + 44px + 12px间距） */
   }
 
   .chat-header h1 {
@@ -431,7 +431,7 @@ summary:hover {
   }
 
   .chat-messages {
-    padding: var(--spacing-lg) var(--spacing-md);
+    margin-bottom: var(--spacing-md);
     gap: var(--spacing-lg);
   }
 
