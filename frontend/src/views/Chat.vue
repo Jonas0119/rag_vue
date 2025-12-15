@@ -88,6 +88,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted } from 'vue'
 import { useChatStore } from '@/stores/chat'
+import type { Message } from '@/types/chat'
 
 const chatStore = useChatStore()
 const inputMessage = ref('')

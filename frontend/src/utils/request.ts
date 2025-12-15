@@ -1,7 +1,7 @@
 /**
  * Axios 请求封装
  */
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
+import axios, { AxiosInstance, AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types/api'
 
 // 创建 axios 实例

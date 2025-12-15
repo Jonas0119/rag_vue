@@ -41,6 +41,8 @@ const router = createRouter({
 // 路由守卫
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
+  // 标记 from 已使用，避免 TypeScript noUnusedParameters 报错
+  void from
   
   // 初始化认证状态
   if (authStore.token && !authStore.user) {
