@@ -17,7 +17,8 @@ export const useDocumentsStore = defineStore('documents', () => {
     isLoading.value = true
     try {
       const docList = await documentsApi.getDocuments()
-      documents.value = docList
+      // 双重保障：过滤掉 deleted 状态的文档（后端已过滤，这里作为额外保障）
+      documents.value = docList.filter(doc => doc.status !== 'deleted')
     } finally {
       isLoading.value = false
     }
@@ -76,6 +77,7 @@ export const useDocumentsStore = defineStore('documents', () => {
    */
   async function deleteDocument(docId: string): Promise<void> {
     await documentsApi.deleteDocument(docId)
+    // 从列表中移除（乐观更新）
     documents.value = documents.value.filter(doc => doc.doc_id !== docId)
   }
 

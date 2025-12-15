@@ -55,9 +55,13 @@ class MessageDAO:
         retrieved_docs_json = json.dumps(retrieved_docs) if retrieved_docs else None
         thinking_process_json = json.dumps(thinking_process) if thinking_process else None
         
+        # 清理 content 中的 NULL 字符（PostgreSQL 不允许字符串包含 NULL 字符）
+        # 虽然消息内容通常不会包含 NULL 字符，但为了安全起见进行清理
+        cleaned_content = content.replace('\x00', '') if content else ''
+        
         message_id = self.db.execute_insert(
             query,
-            (session_id, role, content, retrieved_docs_json, thinking_process_json, tokens_used)
+            (session_id, role, cleaned_content, retrieved_docs_json, thinking_process_json, tokens_used)
         )
         
         return message_id

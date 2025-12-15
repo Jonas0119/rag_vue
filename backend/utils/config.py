@@ -129,6 +129,16 @@ class Config:
     NORMALIZE_EMBEDDINGS = os.getenv("NORMALIZE_EMBEDDINGS", "true").lower() == "true"
     # 模型下载源：huggingface 或 modelscope
     MODEL_DOWNLOAD_SOURCE = os.getenv("MODEL_DOWNLOAD_SOURCE", "modelscope").lower()
+
+    # 推理服务（ngrok）配置
+    INFERENCE_API_BASE_URL = os.getenv(
+        "INFERENCE_API_BASE_URL", "https://nonanesthetized-nolan-riantly.ngrok-free.dev"
+    )
+    INFERENCE_API_KEY = os.getenv("INFERENCE_API_KEY", "")
+    USE_REMOTE_EMBEDDINGS = os.getenv("USE_REMOTE_EMBEDDINGS", "false").lower() == "true"
+    USE_REMOTE_RERANKER = os.getenv("USE_REMOTE_RERANKER", "false").lower() == "true"
+    INFERENCE_API_TIMEOUT = float(os.getenv("INFERENCE_API_TIMEOUT", "15"))
+    INFERENCE_API_MAX_RETRY = int(os.getenv("INFERENCE_API_MAX_RETRY", "2"))
     
     # 认证配置
     AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "rag_auth_token")

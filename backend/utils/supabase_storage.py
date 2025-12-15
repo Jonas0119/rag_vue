@@ -3,6 +3,7 @@ Supabase Storage 封装
 """
 from typing import Optional, Tuple
 import logging
+import time
 from supabase import create_client, Client
 
 from backend.utils.config import config
@@ -27,7 +28,7 @@ class SupabaseStorage:
     
     def upload_file(self, file_data: bytes, file_path: str, content_type: str = "application/octet-stream") -> Tuple[bool, str]:
         """
-        上传文件到 Supabase Storage
+        上传文件到 Supabase Storage（支持大文件分块上传）
         
         Args:
             file_data: 文件二进制数据
@@ -40,22 +41,211 @@ class SupabaseStorage:
         file_size = len(file_data)
         details = f"size={file_size} bytes, path={file_path}"
         
+        # Supabase Storage 单次上传限制通常是 5-10MB，超过此大小需要使用分块上传
+        CHUNK_SIZE_THRESHOLD = 5 * 1024 * 1024  # 5MB
+        
         with monitor_storage("upload_file", details):
             try:
-                response = self.client.storage.from_(self.bucket_name).upload(
-                    path=file_path,
-                    file=file_data,
-                    file_options={
-                        "content-type": content_type,
-                        "upsert": "false"  # 不覆盖已存在的文件
-                    }
-                )
-                logger.info(f"[Supabase Storage] 文件上传成功: {file_path}")
-                return True, file_path
+                # 对于大文件，使用 io.BytesIO 包装并尝试上传
+                # 如果仍然失败，则使用 HTTP 直接上传（分块）
+                if file_size > CHUNK_SIZE_THRESHOLD:
+                    # 尝试使用 io.BytesIO 包装数据
+                    import io
+                    file_obj = io.BytesIO(file_data)
+                    upload_start = time.time()
+                    try:
+                        response = self.client.storage.from_(self.bucket_name).upload(
+                            path=file_path,
+                            file=file_obj,
+                            file_options={
+                                "content-type": content_type,
+                                "upsert": "false"
+                            }
+                        )
+                        logger.info(f"[Supabase Storage] 大文件上传成功（使用 BytesIO）: {file_path}, 大小: {file_size} bytes")
+                        return True, file_path
+                    except Exception as bytesio_error:
+                        # BytesIO 方式失败，尝试使用 TUS 分块上传
+                        # 优先使用 TUS 协议（推荐用于大文件）
+                        tus_result = self._upload_large_file_tus(file_data, file_path, content_type)
+                        if tus_result[0]:
+                            return tus_result
+                        # 如果 TUS 失败，降级到 HTTP 直接上传（可能仍然失败，但尝试一下）
+                        logger.warning(f"[Supabase Storage] TUS 上传失败，尝试 HTTP 直接上传: {tus_result[1]}")
+                        return self._upload_large_file_http(file_data, file_path, content_type)
+                else:
+                    # 小文件，使用原来的方式
+                    upload_start = time.time()
+                    response = self.client.storage.from_(self.bucket_name).upload(
+                        path=file_path,
+                        file=file_data,
+                        file_options={
+                            "content-type": content_type,
+                            "upsert": "false"
+                        }
+                    )
+                    logger.info(f"[Supabase Storage] 文件上传成功: {file_path}")
+                    return True, file_path
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"[Supabase Storage] 文件上传失败: {file_path}, 错误: {error_msg}")
                 return False, error_msg
+    
+    def _upload_large_file_tus(self, file_data: bytes, file_path: str, content_type: str) -> Tuple[bool, str]:
+        """
+        使用 TUS 协议进行大文件分块上传
+        
+        Args:
+            file_data: 文件二进制数据
+            file_path: 文件路径
+            content_type: 文件 MIME 类型
+        
+        Returns:
+            (是否成功, 文件路径或错误信息)
+        """
+        try:
+            from tusclient import client as tus_client
+            
+            # 构建 TUS 上传端点
+            # Supabase Storage TUS 端点格式：{SUPABASE_URL}/storage/v1/upload/resumable
+            tus_endpoint = f"{config.SUPABASE_URL}/storage/v1/upload/resumable"
+            
+            # 准备请求头（authorization 应该在 headers 中，而不是 metadata 中）
+            headers = {
+                "Authorization": f"Bearer {config.SUPABASE_SERVICE_KEY}",
+                "apikey": config.SUPABASE_SERVICE_KEY,
+                "x-upsert": "false"
+            }
+            
+            # 准备元数据（TUS 协议格式）
+            metadata = {
+                "bucketName": self.bucket_name,
+                "objectName": file_path,
+                "contentType": content_type
+            }
+            
+            # 创建 TUS 客户端（传入 headers）
+            client = tus_client.TusClient(tus_endpoint, headers=headers)
+            
+            # tuspy 需要文件路径，不能直接使用 BytesIO
+            # 将 bytes 数据写入临时文件
+            import tempfile
+            import os
+            
+            # 创建临时文件
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.tmp') as tmp_file:
+                tmp_file.write(file_data)
+                tmp_file_path = tmp_file.name
+            
+            try:
+                # 打开文件对象用于上传
+                # tuspy 的 uploader 需要文件对象，而不是文件路径
+                with open(tmp_file_path, 'rb') as file_stream:
+                    # 创建上传器（使用 6MB 块大小，这是 Supabase 推荐的）
+                    uploader = client.uploader(
+                        file_stream=file_stream,
+                        chunk_size=6 * 1024 * 1024,  # 6MB chunks
+                        metadata=metadata
+                    )
+                    
+                    # 执行上传
+                    uploader.upload()
+                    logger.info(f"[Supabase Storage] 大文件 TUS 上传成功: {file_path}, 大小: {len(file_data)} bytes")
+                    return True, file_path
+            finally:
+                # 清理临时文件
+                try:
+                    if os.path.exists(tmp_file_path):
+                        os.unlink(tmp_file_path)
+                except Exception as cleanup_error:
+                    logger.warning(f"[Supabase Storage] 清理临时文件失败: {cleanup_error}")
+            
+        except ImportError:
+            error_msg = "使用 TUS 上传需要安装 tuspy: pip install tuspy"
+            logger.error(f"[Supabase Storage] {error_msg}")
+            return False, error_msg
+        except Exception as e:
+            error_msg = str(e)
+            
+            # 检查是否是 413 错误（文件大小限制）
+            if "413" in error_msg or "Payload too large" in error_msg or "exceeded the maximum" in error_msg:
+                detailed_error = (
+                    f"文件大小超过 Supabase Storage 限制。"
+                    f"文件大小: {len(file_data) / (1024*1024):.2f} MB。"
+                    f"请检查："
+                    f"1. Supabase Dashboard -> Storage Settings -> Global file size limit（免费版最大 50MB）"
+                    f"2. Storage Buckets -> {self.bucket_name} -> Edit bucket -> Restrict file size"
+                    f"3. 确保限制值大于文件大小"
+                )
+                logger.error(f"[Supabase Storage] TUS 上传失败（文件大小限制）: {detailed_error}")
+                return False, detailed_error
+            else:
+                logger.error(f"[Supabase Storage] TUS 上传异常: {error_msg}")
+                return False, f"TUS 上传失败: {error_msg}"
+    
+    def _upload_large_file_http(self, file_data: bytes, file_path: str, content_type: str) -> Tuple[bool, str]:
+        """
+        使用 HTTP 请求直接上传大文件
+        
+        Args:
+            file_data: 文件二进制数据
+            file_path: 文件路径
+            content_type: 文件 MIME 类型
+        
+        Returns:
+            (是否成功, 文件路径或错误信息)
+        """
+        try:
+            from urllib.request import Request, urlopen
+            from urllib.error import HTTPError, URLError
+            import json as json_lib
+            
+            # 构建上传 URL（使用 S3 兼容的 PUT 端点，支持大文件）
+            # 注意：需要 URL 编码文件路径
+            from urllib.parse import quote
+            encoded_path = quote(file_path, safe='')
+            # 使用 S3 兼容端点：/storage/v1/object/sign/{bucket}/{path}
+            # 或者直接使用：/storage/v1/object/{bucket}/{path} 配合 PUT 方法
+            upload_url = f"{config.SUPABASE_URL}/storage/v1/object/{self.bucket_name}/{encoded_path}"
+            
+            # 准备请求头（S3 兼容上传需要特定的头部）
+            headers = {
+                "Authorization": f"Bearer {config.SUPABASE_SERVICE_KEY}",
+                "Content-Type": content_type,
+                "apikey": config.SUPABASE_SERVICE_KEY,
+                "x-upsert": "false"
+            }
+            
+            # 执行上传（使用 PUT 方法，S3 兼容，支持大文件）
+            upload_start = time.time()
+            req = Request(upload_url, data=file_data, headers=headers, method="PUT")
+            
+            try:
+                with urlopen(req, timeout=300) as response:
+                    status_code = response.getcode()
+                    response_body = response.read().decode('utf-8', errors='ignore')[:200]
+                    
+                    if status_code in [200, 201]:
+                        logger.info(f"[Supabase Storage] 大文件 HTTP 上传成功: {file_path}, 大小: {len(file_data)} bytes")
+                        return True, file_path
+                    else:
+                        error_msg = f"HTTP 上传失败: {status_code} - {response_body}"
+                        logger.error(f"[Supabase Storage] {error_msg}")
+                        return False, error_msg
+            except HTTPError as e:
+                error_body = e.read().decode('utf-8', errors='ignore')[:200] if hasattr(e, 'read') else str(e)
+                error_msg = f"HTTP 上传失败: {e.code} - {e.reason} - {error_body}"
+                logger.error(f"[Supabase Storage] {error_msg}")
+                return False, error_msg
+            except URLError as e:
+                error_msg = f"URL 错误: {str(e)}"
+                logger.error(f"[Supabase Storage] {error_msg}")
+                return False, error_msg
+                
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"[Supabase Storage] HTTP 上传异常: {error_msg}")
+            return False, error_msg
     
     def download_file(self, file_path: str) -> Optional[bytes]:
         """

@@ -95,6 +95,38 @@ class SessionService:
         messages = self.message_dao.get_session_messages(session_id)
         return [msg.to_dict() for msg in messages]
     
+    def delete_message(self, message_id: int, user_id: int) -> str:
+        """
+        删除指定消息，并验证归属
+        
+        Args:
+            message_id: 消息 ID
+            user_id: 当前用户 ID（用于权限校验）
+        
+        Returns:
+            session_id: 被删除消息所属的会话 ID
+        
+        Raises:
+            ValueError: 消息不存在
+            PermissionError: 无权删除（不属于当前用户）
+        """
+        message = self.message_dao.get_message(message_id)
+        if not message:
+            raise ValueError("消息不存在")
+        
+        session = self.session_dao.get_session(message.session_id)
+        if not session or session.user_id != user_id:
+            raise PermissionError("无权删除该消息")
+        
+        # 删除消息
+        self.message_dao.delete_message(message_id)
+        
+        # 更新会话计数（防止负数）
+        if session.message_count and session.message_count > 0:
+            self.session_dao.increment_message_count(message.session_id, -1)
+        
+        return message.session_id
+    
     def get_user_sessions(self, user_id: int, limit: int = 50) -> Dict[str, List]:
         """
         获取用户会话（按时间分组）

@@ -17,6 +17,47 @@
 
 所有配置通过 Vercel 环境变量管理，参考 `config_template.txt`
 
+### 3. 本地推理服务（ngrok）准备
+
+当前项目 **不在 Vercel 中加载/下载 Embedding 与 Rerank 模型**，而是通过本地 FastAPI 服务 + ngrok 暴露出来的云推理接口：
+
+- 本地目录：`inference_service/`
+- 接口：
+  - `GET /health`
+  - `POST /embed`
+  - `POST /rerank`
+- 默认端口：`8001`
+- 通过 `ngrok http 8001` 暴露为公网 HTTPS 地址（例如：`https://xxx.ngrok-free.dev`）
+
+部署到 Vercel 前，请先在本地完成以下操作：
+
+1. 在项目根目录安装依赖并启动推理服务：
+
+   ```bash
+   poetry install
+   poetry run uvicorn inference_service.main:app --host 0.0.0.0 --port 8001
+   ```
+
+2. 启动 ngrok 暴露本地端口：
+
+   ```bash
+   ngrok http 8001
+   # 记下返回的 HTTPS 公网 URL，例如：
+   # https://nonanesthetized-nolan-riantly.ngrok-free.dev
+   ```
+
+3. 在 Vercel 后端项目中，将该 URL 配置到环境变量 `INFERENCE_API_BASE_URL` 中，并确保：
+
+   ```env
+   USE_REMOTE_EMBEDDINGS=true
+   USE_REMOTE_RERANKER=true   # 若需要远程 rerank
+   INFERENCE_API_BASE_URL=https://your-ngrok-url.ngrok-free.dev
+   INFERENCE_API_KEY=与你在 inference_service 中配置的 INFERENCE_API_KEY 保持一致
+   MODEL_DOWNLOAD_SOURCE=modelscope
+   ```
+
+> 注意：Vercel 每次调用后端时，都会通过 `INFERENCE_API_BASE_URL` 访问你本地的推理服务，因此在使用期间需要保持本地 `inference_service` 与 `ngrok` 长期运行。
+
 ## 🚀 部署步骤
 
 ### 步骤 1: 准备代码
@@ -68,6 +109,13 @@ STORAGE_MODE=cloud
 VECTOR_DB_MODE=cloud
 DATABASE_MODE=cloud
 ```
+
+此时：
+
+- **文件存储** 走 Supabase Storage
+- **数据库** 走 Supabase PostgreSQL
+- **向量库** 走 Pinecone（远程云向量库）
+- **Embedding / Rerank** 走本地 `inference_service` + ngrok 暴露的 HTTP 接口（通过上文的 `INFERENCE_API_BASE_URL` 等变量控制）
 
 #### Supabase 配置（STORAGE_MODE=cloud 时必需）
 

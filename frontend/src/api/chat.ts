@@ -146,5 +146,22 @@ export const chatApi = {
     }
     
     return response.json()
+  },
+
+  /**
+   * 删除消息
+   */
+  async deleteMessage(sessionId: string, messageId: number): Promise<void> {
+    const response = await fetch(`/api/chat/sessions/${sessionId}/messages/${messageId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('token')}`
+      }
+    })
+    
+    if (!response.ok) {
+      const msg = await response.text()
+      throw new Error(msg || `HTTP error! status: ${response.status}`)
+    }
   }
 }

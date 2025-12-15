@@ -74,10 +74,20 @@
             :class="['session-item', { active: chatStore.currentSessionId === session.session_id }]"
             @click="handleSessionClick(session.session_id)"
           >
-            <div class="session-title">{{ session.title }}</div>
-            <div class="session-meta">
-              <span>{{ session.message_count }} 条消息</span>
+            <div class="session-content">
+              <div class="session-title">{{ session.title }}</div>
+              <div class="session-meta">
+                <span>{{ session.message_count }} 条消息</span>
+              </div>
             </div>
+            <button
+              class="session-delete-btn"
+              @click.stop="handleDeleteSession(session.session_id, session.title)"
+              :title="'删除会话：' + session.title"
+              aria-label="删除会话"
+            >
+              🗑️
+            </button>
           </div>
         </div>
       </div>
@@ -117,6 +127,21 @@ function handleSessionClick(sessionId: string) {
   chatStore.selectSession(sessionId)
   // 在移动端点击会话项时关闭菜单
   closeMenuOnMobile()
+}
+
+async function handleDeleteSession(sessionId: string, sessionTitle: string) {
+  // 确认删除
+  if (!confirm(`确定要删除会话"${sessionTitle}"吗？\n\n此操作无法撤销，会话中的所有消息将被删除。`)) {
+    return
+  }
+
+  try {
+    // deleteSession 内部已实现乐观更新，会立即从 UI 移除
+    await chatStore.deleteSession(sessionId)
+  } catch (error: any) {
+    // 错误已在 store 中处理（会回滚乐观更新），这里只显示提示
+    alert(error.message || '删除会话失败，请稍后重试')
+  }
 }
 
 // 监听窗口大小变化，在桌面端自动打开菜单
@@ -345,6 +370,15 @@ async function handleLogout() {
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all var(--transition-base);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.session-content {
+  flex: 1;
+  min-width: 0;
 }
 
 .session-item:hover {
@@ -379,6 +413,50 @@ async function handleLogout() {
 .session-meta {
   font-size: 12px;
   color: var(--color-text-muted);
+}
+
+.session-delete-btn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all var(--transition-base);
+  color: var(--color-text-muted);
+}
+
+.session-item:hover .session-delete-btn {
+  opacity: 1;
+}
+
+.session-delete-btn:hover {
+  background: var(--color-danger);
+  color: white;
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.session-item.active .session-delete-btn {
+  opacity: 0.7;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.session-item.active:hover .session-delete-btn {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.session-item.active .session-delete-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  color: white;
 }
 
 .main-content {
@@ -419,6 +497,16 @@ async function handleLogout() {
   .main-content {
     margin-left: 0;
     width: 100%;
+  }
+
+  /* 移动端：删除按钮始终可见 */
+  .session-delete-btn {
+    opacity: 0.6;
+  }
+
+  .session-item:hover .session-delete-btn,
+  .session-item.active .session-delete-btn {
+    opacity: 0.8;
   }
 }
 

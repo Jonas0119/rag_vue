@@ -6,6 +6,7 @@ import { ref, computed } from 'vue'
 import { authApi } from '@/api/auth'
 import type { User, LoginRequest, RegisterRequest } from '@/types/user'
 import router from '@/router'
+import { useChatStore } from '@/stores/chat'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
@@ -23,6 +24,10 @@ export const useAuthStore = defineStore('auth', () => {
       token.value = response.token
       user.value = response.user
       localStorage.setItem('token', response.token)
+      // 登录成功后，清空上一用户的会话数据并拉取当前用户最近会话
+      const chatStore = useChatStore()
+      chatStore.resetState()
+      await chatStore.loadLatestSession()
       
       // 跳转到首页
       router.push('/')
@@ -41,6 +46,10 @@ export const useAuthStore = defineStore('auth', () => {
       token.value = response.token
       user.value = response.user
       localStorage.setItem('token', response.token)
+      // 注册后同样刷新会话数据，避免复用旧状态
+      const chatStore = useChatStore()
+      chatStore.resetState()
+      await chatStore.loadLatestSession()
       
       // 跳转到首页
       router.push('/')
@@ -57,6 +66,9 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = null
     user.value = null
     localStorage.removeItem('token')
+    // 清空会话状态，防止串用上一用户的数据
+    const chatStore = useChatStore()
+    chatStore.resetState()
     
     // 跳转到登录页
     router.push('/login')

@@ -2,13 +2,14 @@
 向量库服务 - 支持 Chroma 和 Pinecone
 """
 import os
-from typing import List, Optional, Union
+from typing import List, Optional
 from pathlib import Path
 import threading
 import logging
 
 from backend.utils.config import config
 from backend.utils.model_downloader import get_model_path
+from .remote_embeddings import RemoteEmbeddings
 
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -28,6 +29,9 @@ class VectorStoreService:
         self._embeddings_loading = False
         self._embeddings_loaded = False
         self._embeddings_lock = threading.Lock()
+        self._use_remote = config.USE_REMOTE_EMBEDDINGS and bool(
+            config.INFERENCE_API_BASE_URL
+        )
         
         # 在后台线程中启动模型加载
         self._start_loading_embeddings()
@@ -49,29 +53,43 @@ class VectorStoreService:
     def _load_embeddings_async(self):
         """异步加载 Embedding 模型（在后台线程中执行）"""
         try:
-            logger.info(f"[向量库服务] 开始加载 Embedding 模型: {config.EMBEDDING_MODEL}")
-            # 解决 HuggingFace tokenizers 的 fork 警告
-            os.environ["TOKENIZERS_PARALLELISM"] = "false"
-            
-            # 根据下载源获取模型路径
-            # 如果使用 ModelScope，会先下载到本地默认缓存目录，然后返回本地路径
-            # 如果使用 HuggingFace，直接返回模型名称
-            model_path = get_model_path(
-                config.EMBEDDING_MODEL,
-                config.MODEL_DOWNLOAD_SOURCE
-            )
-            
-            if config.MODEL_DOWNLOAD_SOURCE == "modelscope":
-                logger.info(f"[向量库服务] 使用 ModelScope 下载的本地模型: {model_path}")
+            if self._use_remote:
+                logger.info(
+                    "[向量库服务] 使用远程 Embeddings 服务: %s",
+                    config.INFERENCE_API_BASE_URL,
+                )
+                embeddings = RemoteEmbeddings(
+                    base_url=config.INFERENCE_API_BASE_URL,
+                    api_key=config.INFERENCE_API_KEY,
+                    timeout=config.INFERENCE_API_TIMEOUT,
+                    max_retry=config.INFERENCE_API_MAX_RETRY,
+                )
             else:
-                logger.info(f"[向量库服务] 使用 HuggingFace 模型: {model_path}")
-            
-            # 使用模型路径加载（支持本地路径和 HuggingFace 模型名称）
-            embeddings = HuggingFaceEmbeddings(
-                model_name=model_path,
-                model_kwargs={'device': config.EMBEDDING_DEVICE},
-                encode_kwargs={'normalize_embeddings': config.NORMALIZE_EMBEDDINGS}
-            )
+                logger.info(
+                    f"[向量库服务] 开始加载本地 Embedding 模型: {config.EMBEDDING_MODEL}"
+                )
+                # 解决 HuggingFace tokenizers 的 fork 警告
+                os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+                # 根据下载源获取模型路径
+                # 如果使用 ModelScope，会先下载到本地默认缓存目录，然后返回本地路径
+                # 如果使用 HuggingFace，直接返回模型名称
+                model_path = get_model_path(
+                    config.EMBEDDING_MODEL,
+                    config.MODEL_DOWNLOAD_SOURCE
+                )
+
+                if config.MODEL_DOWNLOAD_SOURCE == "modelscope":
+                    logger.info(f"[向量库服务] 使用 ModelScope 下载的本地模型: {model_path}")
+                else:
+                    logger.info(f"[向量库服务] 使用 HuggingFace 模型: {model_path}")
+
+                # 使用模型路径加载（支持本地路径和 HuggingFace 模型名称）
+                embeddings = HuggingFaceEmbeddings(
+                    model_name=model_path,
+                    model_kwargs={'device': config.EMBEDDING_DEVICE},
+                    encode_kwargs={'normalize_embeddings': config.NORMALIZE_EMBEDDINGS}
+                )
             
             with self._embeddings_lock:
                 self.embeddings = embeddings

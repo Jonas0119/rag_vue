@@ -29,7 +29,7 @@ from .rag_nodes import (
 )
 from .rag_tools import create_retrieve_tool
 from .hybrid_retriever import HybridRetriever
-from .reranker import CrossEncoderReranker
+from .reranker import CrossEncoderReranker, RemoteReranker
 from .checkpoint_manager import create_checkpointer
 from backend.database import ParentChildDAO
 from backend.utils.token_counter import token_counter
@@ -102,7 +102,15 @@ class RAGService:
         # reranker（可选）
         reranker = None
         if config.USE_RERANKER:
-            reranker = CrossEncoderReranker()
+            if config.USE_REMOTE_RERANKER and config.INFERENCE_API_BASE_URL:
+                reranker = RemoteReranker(
+                    base_url=config.INFERENCE_API_BASE_URL,
+                    api_key=config.INFERENCE_API_KEY,
+                    timeout=config.INFERENCE_API_TIMEOUT,
+                    max_retry=config.INFERENCE_API_MAX_RETRY,
+                )
+            else:
+                reranker = CrossEncoderReranker()
 
         retrieve_tool = create_retrieve_tool(
             retriever=retriever,

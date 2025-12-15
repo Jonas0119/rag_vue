@@ -5,6 +5,7 @@ Graph 节点函数模块
 
 from typing import Literal, Any, Optional
 import logging
+import uuid
 from pydantic import BaseModel, Field
 from langchain.messages import HumanMessage, ToolMessage, SystemMessage, AIMessage
 
@@ -459,6 +460,165 @@ def _clean_summary_content(summary_content: str) -> str:
     return cleaned_content
 
 
+def _validate_and_fix_tool_calls(messages: list) -> list:
+    """
+    验证并修复工具调用格式，确保符合 Anthropic API 要求
+    
+    Anthropic API 严格要求：
+    1. 如果 AIMessage 包含 tool_calls，每个 tool_call 必须有唯一的 id（字符串）
+    2. 对应的 ToolMessage 必须有 tool_call_id，且必须与 tool_call 的 id 完全匹配
+    3. ToolMessage 必须紧跟在包含 tool_calls 的 AIMessage 之后
+    4. 如果 AIMessage 有 tool_calls，所有 tool_calls 都必须有对应的 ToolMessage
+    
+    Args:
+        messages: 消息列表
+        
+    Returns:
+        修复后的消息列表
+    """
+    if not messages:
+        return messages
+    
+    fixed_messages = []
+    i = 0
+    
+    while i < len(messages):
+        msg = messages[i]
+        
+        # 检查是否是包含工具调用的 AIMessage
+        if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls:
+            # 验证并修复 tool_calls 的 id 格式
+            fixed_tool_calls = []
+            tool_call_ids = []
+            
+            for tc in msg.tool_calls:
+                if isinstance(tc, dict):
+                    tool_call_id = tc.get('id', tc.get('tool_call_id'))
+                    # 确保 id 是字符串类型
+                    if tool_call_id is not None:
+                        tool_call_id = str(tool_call_id)
+                        tc['id'] = tool_call_id
+                        if 'tool_call_id' in tc:
+                            del tc['tool_call_id']
+                    else:
+                        # 如果没有 id，生成一个（不应该发生，但为了安全）
+                        tool_call_id = str(uuid.uuid4())
+                        tc['id'] = tool_call_id
+                        logger.warning(f"[修复工具调用] 为工具调用生成新的 ID: {tool_call_id}")
+                    fixed_tool_calls.append(tc)
+                    tool_call_ids.append(tool_call_id)
+                else:
+                    # ToolCall 对象
+                    tool_call_id = getattr(tc, 'id', getattr(tc, 'tool_call_id', None))
+                    if tool_call_id is not None:
+                        tool_call_id = str(tool_call_id)
+                        # 创建新的字典格式（Anthropic API 要求）
+                        fixed_tc = {
+                            'id': tool_call_id,
+                            'name': getattr(tc, 'name', 'unknown'),
+                            'args': getattr(tc, 'args', getattr(tc, 'arguments', {}))
+                        }
+                        fixed_tool_calls.append(fixed_tc)
+                        tool_call_ids.append(tool_call_id)
+                    else:
+                        # 如果没有 id，生成一个
+                        tool_call_id = str(uuid.uuid4())
+                        fixed_tc = {
+                            'id': tool_call_id,
+                            'name': getattr(tc, 'name', 'unknown'),
+                            'args': getattr(tc, 'args', getattr(tc, 'arguments', {}))
+                        }
+                        fixed_tool_calls.append(fixed_tc)
+                        tool_call_ids.append(tool_call_id)
+                        logger.warning(f"[修复工具调用] 为工具调用生成新的 ID: {tool_call_id}")
+            
+            # 创建修复后的 AIMessage
+            fixed_ai_msg = AIMessage(
+                content=msg.content,
+                tool_calls=fixed_tool_calls,
+                additional_kwargs=getattr(msg, 'additional_kwargs', {})
+            )
+            fixed_messages.append(fixed_ai_msg)
+            i += 1
+            
+            # 检查后续的 ToolMessage 是否匹配
+            tool_call_ids_set = set(tool_call_ids)
+            found_tool_messages = set()
+            
+            # 查找匹配的 ToolMessage（必须紧跟在 AIMessage 之后）
+            while i < len(messages):
+                next_msg = messages[i]
+                
+                # 如果遇到新的 AIMessage 或 HumanMessage，停止查找
+                if isinstance(next_msg, AIMessage) or isinstance(next_msg, HumanMessage):
+                    break
+                
+                if isinstance(next_msg, ToolMessage):
+                    tool_call_id = getattr(next_msg, 'tool_call_id', None)
+                    if tool_call_id is not None:
+                        tool_call_id = str(tool_call_id)  # 确保是字符串
+                        if tool_call_id in tool_call_ids_set:
+                            # 修复 ToolMessage 的 tool_call_id（确保是字符串）
+                            fixed_tool_msg = ToolMessage(
+                                content=next_msg.content,
+                                tool_call_id=tool_call_id
+                            )
+                            fixed_messages.append(fixed_tool_msg)
+                            found_tool_messages.add(tool_call_id)
+                            i += 1
+                        else:
+                            # tool_call_id 不匹配，跳过这个 ToolMessage（可能是孤立的）
+                            logger.warning(f"[修复工具调用] 跳过不匹配的 ToolMessage (tool_call_id: {tool_call_id})")
+                            i += 1
+                    else:
+                        # ToolMessage 没有 tool_call_id，跳过
+                        logger.warning("[修复工具调用] 跳过没有 tool_call_id 的 ToolMessage")
+                        i += 1
+                else:
+                    # 其他类型的消息，保留
+                    fixed_messages.append(next_msg)
+                    i += 1
+            
+            # 检查是否所有工具调用都有对应的 ToolMessage
+            missing_tool_messages = tool_call_ids_set - found_tool_messages
+            if missing_tool_messages:
+                logger.error(
+                    f"[修复工具调用] ⚠️ 警告：部分工具调用没有对应的 ToolMessage: {missing_tool_messages}"
+                )
+                # 移除没有对应 ToolMessage 的工具调用
+                remaining_tool_calls = [
+                    tc for tc in fixed_tool_calls 
+                    if str(tc.get('id', '')) in found_tool_messages
+                ]
+                if remaining_tool_calls:
+                    # 更新 AIMessage，只保留有对应 ToolMessage 的工具调用
+                    fixed_ai_msg = AIMessage(
+                        content=fixed_ai_msg.content,
+                        tool_calls=remaining_tool_calls,
+                        additional_kwargs=fixed_ai_msg.additional_kwargs
+                    )
+                    fixed_messages[-1] = fixed_ai_msg
+                else:
+                    # 所有工具调用都没有对应的 ToolMessage，移除工具调用
+                    if fixed_ai_msg.content:
+                        fixed_ai_msg = AIMessage(
+                            content=fixed_ai_msg.content,
+                            tool_calls=[],
+                            additional_kwargs=fixed_ai_msg.additional_kwargs
+                        )
+                        fixed_messages[-1] = fixed_ai_msg
+                    else:
+                        # 没有内容也没有有效的工具调用，移除这条消息
+                        fixed_messages.pop()
+                        logger.warning("[修复工具调用] 移除无效的 AIMessage（没有内容且没有有效的工具调用）")
+        else:
+            # 不是包含工具调用的 AIMessage，直接保留
+            fixed_messages.append(msg)
+            i += 1
+    
+    return fixed_messages
+
+
 def _clean_orphaned_tool_calls(messages: list) -> list:
     """
     清理未配对的工具调用
@@ -478,6 +638,9 @@ def _clean_orphaned_tool_calls(messages: list) -> list:
     """
     if not messages:
         return messages
+    
+    # 先验证并修复工具调用格式
+    messages = _validate_and_fix_tool_calls(messages)
     
     cleaned_messages = []
     i = 0
@@ -608,10 +771,9 @@ REWRITE_PROMPT = (
 GENERATE_PROMPT = (
     "你是一个问答助手。请使用以下检索到的上下文内容来回答问题。\n\n"
     "**指令：**\n"
-    "- 如果上下文包含足够的信息来回答问题，请提供清晰简洁的答案。\n"
-    "- 如果上下文只包含标题、标题或目录而没有实际内容，"
-    "你应该指出检索到的信息不足，并建议可能需要更具体的搜索。\n"
-    "- 最多使用三句话，保持答案简洁。\n\n"
+    "- 如果上下文包含足够的信息来回答问题，请提供清晰简洁的答案，不要有废话。\n"
+    "- 如果上下文只包含标题、标题或目录而没有实际内容，你应该指出检索到的信息不足，并建议可能需要更具体的搜索。\n\n"
+    #"- 最多使用三句话，保持答案简洁。\n\n"
     "问题：{question} \n\n"
     "上下文：{context}\n\n"
     "答案："

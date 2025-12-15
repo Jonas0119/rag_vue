@@ -57,8 +57,11 @@ def check_cloud_deployment_config() -> Tuple[bool, List[str]]:
         if not config.PINECONE_API_KEY or "your_pinecone" in config.PINECONE_API_KEY:
             errors.append("VECTOR_DB_MODE=cloud 但 PINECONE_API_KEY 未配置或使用占位符")
         
+        # 注意：Pinecone v6.0.0+ 不再需要 PINECONE_ENVIRONMENT
+        # 新版本使用不同的 API 架构，环境信息包含在 API Key 中
+        # 保留此检查仅作为警告，不阻止部署
         if not config.PINECONE_ENVIRONMENT:
-            errors.append("VECTOR_DB_MODE=cloud 但 PINECONE_ENVIRONMENT 未配置")
+            warnings.append("PINECONE_ENVIRONMENT 未配置（Pinecone v6.0.0+ 不再需要，但保留配置也无妨）")
         
         if not config.PINECONE_INDEX_NAME:
             errors.append("VECTOR_DB_MODE=cloud 但 PINECONE_INDEX_NAME 未配置")

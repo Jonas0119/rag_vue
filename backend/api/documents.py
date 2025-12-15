@@ -45,16 +45,17 @@ async def get_documents(
     user: User = Depends(get_current_user_dependency)
 ):
     """
-    获取用户的文档列表（包括处理中的文档）
+    获取用户的文档列表（包括处理中的文档，排除已删除的文档）
     
     Returns:
-        文档列表
+        文档列表（只包含 active 和 processing 状态的文档）
     """
-    # 直接查询数据库，获取所有状态的文档（包括 processing）
+    # 直接查询数据库，只获取 active 和 processing 状态的文档
+    # 排除 deleted 状态的文档（已硬删除，不应显示）
     from backend.database import DocumentDAO
     doc_dao = DocumentDAO()
     
-    # 获取所有状态的文档（不限制 status，传入 None）
+    # 获取所有状态的文档（排除 deleted），传入 None 会自动过滤 deleted
     docs = doc_dao.get_user_documents(user.user_id, status=None)
     
     # 转换为字典格式
@@ -273,24 +274,32 @@ async def delete_document(
     user: User = Depends(get_current_user_dependency)
 ):
     """
-    删除文档
+    删除文档（支持删除任何状态的文档，包括处理失败和处理中的文档）
     
     Returns:
         成功消息
     """
     doc_service = get_document_service()
     
-    # 验证文档属于当前用户
-    documents = doc_service.get_user_documents(user.user_id)
-    doc_exists = any(doc['doc_id'] == doc_id for doc in documents)
+    # 直接查询文档（不限制状态，支持删除 error 和 processing 状态的文档）
+    from backend.database import DocumentDAO
+    doc_dao = DocumentDAO()
+    doc = doc_dao.get_document(doc_id)
     
-    if not doc_exists:
+    # 验证文档存在且属于当前用户
+    if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="文档不存在或无权限"
+            detail="文档不存在"
         )
     
-    # 删除文档
+    if doc.user_id != user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权删除该文档"
+        )
+    
+    # 删除文档（支持删除任何状态的文档）
     success, message = doc_service.delete_document(user.user_id, doc_id)
     
     if not success:

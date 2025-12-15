@@ -4,8 +4,9 @@ Reranker 模块
 """
 
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict
 
+import requests
 from sentence_transformers import CrossEncoder
 from langchain_core.documents import Document
 
@@ -101,5 +102,97 @@ class CrossEncoderReranker:
         else:
             # 没有阈值，直接返回前 top_n
             return sorted_docs[:top_n]
+
+
+class RemoteReranker:
+    """通过远程推理服务进行重排的封装。"""
+
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str = "",
+        timeout: float = 15.0,
+        max_retry: int = 2,
+    ):
+        if not base_url:
+            raise ValueError("RemoteReranker 需要配置 base_url")
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.timeout = timeout
+        self.max_retry = max_retry
+        self.logger = logging.getLogger(__name__)
+
+    def _headers(self) -> Dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    def rerank(
+        self,
+        query: str,
+        documents: List[Document],
+        top_n: int = 3,
+        score_threshold: Optional[float] = None,
+    ) -> List[Document]:
+        if not documents:
+            return []
+
+        doc_payload = []
+        id_to_doc: Dict[str, Document] = {}
+        for idx, doc in enumerate(documents):
+            doc_id = str(
+                doc.metadata.get("doc_id")
+                or doc.metadata.get("source")
+                or doc.metadata.get("id")
+                or idx
+            )
+            id_to_doc[doc_id] = doc
+            doc_payload.append({"id": doc_id, "text": doc.page_content})
+
+        payload = {
+            "query": query,
+            "documents": doc_payload,
+            "top_n": top_n,
+            "score_threshold": score_threshold,
+        }
+
+        last_err = None
+        url = f"{self.base_url}/rerank"
+        for attempt in range(self.max_retry + 1):
+            try:
+                resp = requests.post(
+                    url, json=payload, headers=self._headers(), timeout=self.timeout
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                results = data.get("results", [])
+                for item in results:
+                    doc_id = str(item.get("id"))
+                    score = float(item.get("score", 0))
+                    doc = id_to_doc.get(doc_id)
+                    if doc is None:
+                        continue
+                    doc.metadata = dict(doc.metadata or {})
+                    doc.metadata["rerank_score"] = score
+
+                # 过滤掉未被远程返回的文档
+                scored_docs = [d for d in documents if "rerank_score" in d.metadata]
+                scored_docs.sort(
+                    key=lambda d: d.metadata.get("rerank_score", 0), reverse=True
+                )
+                if score_threshold is not None:
+                    scored_docs = [
+                        d
+                        for d in scored_docs
+                        if d.metadata.get("rerank_score", 0) >= score_threshold
+                    ]
+                return scored_docs[:top_n]
+            except Exception as e:
+                last_err = e
+                self.logger.warning(
+                    "[RemoteReranker] 请求失败（第 %s 次）：%s", attempt + 1, str(e)
+                )
+        raise RuntimeError(f"远程 rerank 调用失败: {last_err}")
 
 

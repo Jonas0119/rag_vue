@@ -126,7 +126,6 @@ def save_uploaded_file(uploaded_file, save_path: str, user_id: Optional[int] = N
         # 读取文件数据为 bytes（而不是使用 getbuffer() 返回的 memoryview）
         uploaded_file.seek(0)  # 确保从文件开头读取
         file_data = uploaded_file.read()  # 直接读取为 bytes
-        
         success, _ = storage.upload_file(file_data, cloud_path)
         return success
     else:

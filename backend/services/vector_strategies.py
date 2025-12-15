@@ -2,14 +2,12 @@
 向量库策略实现
 """
 from abc import ABC, abstractmethod
-from typing import List, Optional, Union, Dict, Any
+from typing import List, Optional, Dict, Any
 import logging
 from pathlib import Path
 
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
-
 from backend.utils.config import config
 from backend.utils.performance_monitor import monitor_vector_db
 
@@ -27,7 +25,7 @@ except ImportError:
 class VectorStoreStrategy(ABC):
     """向量库策略基类"""
     
-    def __init__(self, embeddings: HuggingFaceEmbeddings):
+    def __init__(self, embeddings: Any):
         self.embeddings = embeddings
 
     @abstractmethod
@@ -69,7 +67,7 @@ class VectorStoreStrategy(ABC):
 class ChromaStrategy(VectorStoreStrategy):
     """Chroma 策略"""
     
-    def __init__(self, embeddings: HuggingFaceEmbeddings):
+    def __init__(self, embeddings: Any):
         super().__init__(embeddings)
         self._cache = {}
 
@@ -135,7 +133,7 @@ class ChromaStrategy(VectorStoreStrategy):
 class PineconeStrategy(VectorStoreStrategy):
     """Pinecone 策略"""
     
-    def __init__(self, embeddings: HuggingFaceEmbeddings):
+    def __init__(self, embeddings: Any):
         super().__init__(embeddings)
         self._cache = {}
         if not PINECONE_AVAILABLE:

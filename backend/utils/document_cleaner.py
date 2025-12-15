@@ -80,6 +80,10 @@ def clean_text(
     if not text:
         return ""
     
+    # 首先移除 NULL 字符（\x00），PostgreSQL 不允许字符串包含 NULL 字符
+    # 这对于从 PDF 等二进制格式解析出的文本特别重要
+    text = text.replace('\x00', '')
+    
     # 去除首尾空白
     text = text.strip()
     

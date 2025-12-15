@@ -23,6 +23,17 @@ export const useChatStore = defineStore('chat', () => {
   })
 
   /**
+   * 重置会话相关状态（用于用户切换/登出）
+   */
+  function resetState(): void {
+    currentSessionId.value = null
+    sessions.value = []
+    messages.value = []
+    currentMessage.value = ''
+    stopStreaming()
+  }
+
+  /**
    * 获取会话列表
    */
   async function fetchSessions(): Promise<void> {
@@ -76,6 +87,20 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = messageList
     // 获取消息后，更新会话的消息计数
     updateSessionMessageCountFromMessages(sessionId)
+  }
+
+  /**
+   * 拉取会话并自动选中最近一条（若存在）
+   * 用于登录后或页面初始加载
+   */
+  async function loadLatestSession(): Promise<void> {
+    await fetchSessions()
+    if (sessions.value.length > 0) {
+      const latest = sessions.value[0]
+      await selectSession(latest.session_id)
+    } else {
+      newChat()
+    }
   }
 
   /**
@@ -163,6 +188,29 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /**
+   * 删除消息（乐观更新）
+   */
+  async function deleteMessage(messageId: number): Promise<void> {
+    const index = messages.value.findIndex(m => m.message_id === messageId)
+    if (index === -1) return
+    
+    const removed = messages.value[index]
+    messages.value.splice(index, 1)
+    updateSessionMessageCountFromMessages(removed.session_id)
+    
+    try {
+      await chatApi.deleteMessage(removed.session_id, messageId)
+      // 异步刷新会话列表同步计数
+      fetchSessions().catch(err => console.error('刷新会话列表失败:', err))
+    } catch (error: any) {
+      // 回滚
+      messages.value.splice(index, 0, removed)
+      updateSessionMessageCountFromMessages(removed.session_id)
+      throw new Error(error.message || '删除消息失败，请稍后重试')
+    }
+  }
+
+  /**
    * 更新会话的消息计数
    */
   function updateSessionMessageCount(sessionId: string, increment: number = 1): void {
@@ -184,15 +232,39 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /**
-   * 删除会话
+   * 删除会话（乐观更新）
+   * 立即从 UI 移除，后台异步删除
    */
   async function deleteSession(sessionId: string): Promise<void> {
-    await chatApi.deleteSession(sessionId)
+    // 乐观更新：立即从列表中移除（UI 立即响应）
+    const sessionToDelete = sessions.value.find(s => s.session_id === sessionId)
     sessions.value = sessions.value.filter(s => s.session_id !== sessionId)
     
+    // 如果删除的是当前会话，立即切换到新会话或清空
     if (currentSessionId.value === sessionId) {
       currentSessionId.value = null
       messages.value = []
+    }
+    
+    // 后台异步调用 API 删除（不阻塞 UI）
+    try {
+      await chatApi.deleteSession(sessionId)
+      // 删除成功，无需额外操作（已在乐观更新中处理）
+    } catch (error: any) {
+      // 删除失败，恢复会话到列表（回滚乐观更新）
+      if (sessionToDelete) {
+        sessions.value.push(sessionToDelete)
+        // 按时间排序（保持原有顺序）
+        sessions.value.sort((a, b) => {
+          const timeA = a.created_at ? new Date(a.created_at).getTime() : 0
+          const timeB = b.created_at ? new Date(b.created_at).getTime() : 0
+          return timeB - timeA
+        })
+      }
+      
+      // 显示错误提示
+      console.error('删除会话失败:', error)
+      throw new Error(error.message || '删除会话失败，请稍后重试')
     }
   }
 
@@ -214,13 +286,16 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming,
     currentSession,
     fetchSessions,
+    loadLatestSession,
     createSession,
     selectSession,
     fetchSessionMessages,
     sendMessage,
+    deleteMessage,
     stopStreaming,
     deleteSession,
     newChat,
+    resetState,
     updateSessionMessageCount,
     updateSessionMessageCountFromMessages
   }

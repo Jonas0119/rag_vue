@@ -52,13 +52,13 @@ class DocumentDAO:
         
         Args:
             user_id: 用户 ID
-            status: 文档状态，None 表示查询所有状态
+            status: 文档状态，None 表示查询所有状态（但排除 deleted）
         """
         if status is None:
-            # 查询所有状态的文档
+            # 查询所有状态的文档，但排除 deleted 状态（已硬删除，不应显示）
             query = """
                 SELECT * FROM documents 
-                WHERE user_id = ?
+                WHERE user_id = ? AND status != 'deleted'
                 ORDER BY upload_at DESC
             """
             rows = self.db.execute_query(query, (user_id,))
@@ -81,6 +81,9 @@ class DocumentDAO:
         for field, value in kwargs.items():
             if field in allowed_fields:
                 updates.append(f"{field} = ?")
+                # 对于文本字段，清理 NULL 字符（PostgreSQL 不允许字符串包含 NULL 字符）
+                if field in ['error_message'] and isinstance(value, str):
+                    value = value.replace('\x00', '')
                 params.append(value)
         
         if not updates:

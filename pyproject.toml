@@ -42,6 +42,8 @@ modelscope = "^1.9.0"
 # ===== 云服务依赖（可选，仅在 cloud 模式下需要）=====
 # Supabase Storage 依赖（STORAGE_MODE=cloud 时需要）
 supabase = "^2.0.0"
+# TUS 客户端（用于大文件分块上传）
+tuspy = "^0.2.4"
 # PostgreSQL 依赖（DATABASE_MODE=cloud 时需要）
 psycopg2-binary = "^2.9.9"
 # Pinecone 依赖（VECTOR_DB_MODE=cloud 时需要）

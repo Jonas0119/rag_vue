@@ -297,6 +297,7 @@ class DocumentService:
     def delete_document(self, user_id: int, doc_id: str) -> Tuple[bool, str]:
         """
         删除文档（包括文件和向量）
+        支持删除任何状态的文档（active、processing、error）
         
         Args:
             user_id: 用户 ID
@@ -306,33 +307,59 @@ class DocumentService:
             (是否成功, 消息)
         """
         try:
-            # 1. 获取文档信息
+            logger.info(f"[文档删除] 开始删除文档: doc_id={doc_id}, user_id={user_id}")
+            
+            # 1. 获取文档信息（不限制状态，支持删除 error 和 processing 状态的文档）
             doc = self.doc_dao.get_document(doc_id)
             if not doc:
+                logger.warning(f"[文档删除] 文档不存在: doc_id={doc_id}")
                 return False, "文档不存在"
+            
+            logger.info(f"[文档删除] 文档信息: doc_id={doc_id}, status={doc.status}, filepath={doc.filepath}")
             
             # 验证权限
             if doc.user_id != user_id:
+                logger.warning(f"[文档删除] 权限验证失败: doc_id={doc_id}, doc.user_id={doc.user_id}, request.user_id={user_id}")
                 return False, "无权删除该文档"
             
-            # 2. 从向量库删除
-            self.vector_service.delete_documents(user_id, doc_id)
+            # 2. 从向量库删除（如果文档已向量化）
+            try:
+                if doc.status == 'active' and doc.chunk_count > 0:
+                    logger.info(f"[文档删除] 删除向量: doc_id={doc_id}, chunk_count={doc.chunk_count}")
+                    self.vector_service.delete_documents(user_id, doc_id)
+                else:
+                    logger.info(f"[文档删除] 跳过向量删除: doc_id={doc_id}, status={doc.status}, chunk_count={doc.chunk_count}")
+            except Exception as e:
+                logger.warning(f"[文档删除] 向量删除失败（继续删除其他资源）: doc_id={doc_id}, error={str(e)}")
+                # 向量删除失败不影响其他删除操作，继续执行
             
             # 3. 删除物理文件
-            if config.STORAGE_MODE == "cloud":
-                # 云存储：直接删除
-                delete_file(doc.filepath)
-            else:
-                # 本地文件系统：检查文件是否存在
-                if os.path.exists(doc.filepath):
+            try:
+                if config.STORAGE_MODE == "cloud":
+                    # 云存储：直接删除
+                    logger.info(f"[文档删除] 删除云存储文件: {doc.filepath}")
                     delete_file(doc.filepath)
+                else:
+                    # 本地文件系统：检查文件是否存在
+                    if os.path.exists(doc.filepath):
+                        logger.info(f"[文档删除] 删除本地文件: {doc.filepath}")
+                        delete_file(doc.filepath)
+                    else:
+                        logger.warning(f"[文档删除] 文件不存在（可能已删除）: {doc.filepath}")
+            except Exception as e:
+                logger.warning(f"[文档删除] 文件删除失败（继续删除数据库记录）: doc_id={doc_id}, filepath={doc.filepath}, error={str(e)}")
+                # 文件删除失败不影响数据库记录删除，继续执行
             
-            # 4. 标记数据库记录为已删除
-            self.doc_dao.delete_document(doc_id)
+            # 4. 硬删除数据库记录（不保留 deleted 状态的记录）
+            # parent_child_maps 会通过外键 CASCADE 自动删除
+            logger.info(f"[文档删除] 删除数据库记录: doc_id={doc_id}")
+            self.doc_dao.hard_delete_document(doc_id)
             
+            logger.info(f"[文档删除] 文档删除成功: doc_id={doc_id}")
             return True, "文档已删除"
         
         except Exception as e:
+            logger.error(f"[文档删除] 文档删除异常: doc_id={doc_id}, error={str(e)}", exc_info=True)
             return False, f"删除失败：{str(e)}"
     
     def get_document_preview(self, user_id: int, doc_id: str, max_length: int = 1000) -> Optional[str]:

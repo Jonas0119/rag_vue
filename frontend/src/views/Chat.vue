@@ -11,6 +11,18 @@
         :class="['message', message.role]"
       >
         <div class="message-content">
+          <div
+            class="message-actions"
+            v-if="message.message_id !== undefined"
+          >
+            <button
+              class="delete-btn"
+              type="button"
+              @click="handleDeleteMessage(message)"
+            >
+              删除
+            </button>
+          </div>
           <div class="message-text" v-html="formatMessage(message.content)"></div>
           
           <div v-if="message.retrieved_docs && message.retrieved_docs.length > 0" class="retrieved-docs">
@@ -111,6 +123,15 @@ watch(() => chatStore.currentMessage, () => {
   })
 })
 
+async function handleDeleteMessage(message: Message) {
+  try {
+    await chatStore.deleteMessage(message.message_id!)
+  } catch (error: any) {
+    console.error('删除消息失败:', error)
+    alert(error.message || '删除消息失败，请稍后重试')
+  }
+}
+
 function scrollToBottom() {
   if (messagesContainer.value) {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
@@ -118,10 +139,10 @@ function scrollToBottom() {
 }
 
 onMounted(async () => {
-  // 刷新会话列表
-  await chatStore.fetchSessions()
-  
-  if (chatStore.currentSessionId) {
+  // 初始加载：拉取会话并自动选中最近一条；若无历史则清空界面
+  if (!chatStore.sessions.length) {
+    await chatStore.loadLatestSession()
+  } else if (chatStore.currentSessionId) {
     await chatStore.fetchSessionMessages(chatStore.currentSessionId)
   }
 })
@@ -203,6 +224,28 @@ watch(() => chatStore.messages.length, () => {
 
 .message-content:hover {
   box-shadow: var(--shadow-md);
+}
+
+.message-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--spacing-xs);
+}
+
+.delete-btn {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.delete-btn:hover {
+  color: var(--color-danger, #e53e3e);
+  border-color: var(--color-danger, #e53e3e);
 }
 
 .message.user .message-content {

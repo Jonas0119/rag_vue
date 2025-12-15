@@ -1,7 +1,7 @@
 """
 会话管理 API 路由（与 chat.py 中的会话端点重复，但保持 RESTful 风格）
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from typing import List
 
 from backend.core.dependencies import get_current_user_dependency
@@ -82,33 +82,58 @@ async def get_session_messages(
 @router.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: str,
+    background_tasks: BackgroundTasks,
     user: User = Depends(get_current_user_dependency)
 ):
     """
-    删除会话（与 /chat/sessions/{session_id} 相同）
+    删除会话（异步删除，立即返回）
+    
+    与 /chat/sessions/{session_id} 使用相同的优化策略
     """
-    session_service = get_session_service()
-    
-    # 验证会话属于当前用户
-    sessions_dict = session_service.get_user_sessions(user.user_id, limit=1000)
-    session_exists = False
-    for date_group, sessions in sessions_dict.items():
-        for session in sessions:
-            if session['session_id'] == session_id:
-                session_exists = True
-                break
-        if session_exists:
-            break
-    
-    if not session_exists:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="会话不存在或无权限"
-        )
-    
-    # 删除会话
     from backend.database import SessionDAO
     session_dao = SessionDAO()
-    session_dao.delete_session(session_id)
     
+    # 优化验证：直接查询单个会话（O(1) 而不是 O(n)）
+    session = session_dao.get_session(session_id)
+    
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在"
+        )
+    
+    # 验证权限
+    if session.user_id != user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权删除该会话"
+        )
+    
+    # 异步删除会话（数据库 CASCADE 会自动删除消息）
+    background_tasks.add_task(
+        _delete_session_background,
+        session_id
+    )
+    
+    # 立即返回成功（乐观更新）
     return {"success": True, "message": "会话已删除"}
+
+
+def _delete_session_background(session_id: str):
+    """
+    后台删除会话（数据库 CASCADE 会自动删除消息）
+    
+    Args:
+        session_id: 会话 ID
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.info(f"[会话删除] 后台删除会话: session_id={session_id}")
+        from backend.database import SessionDAO
+        session_dao = SessionDAO()
+        session_dao.delete_session(session_id)
+        logger.info(f"[会话删除] 会话删除成功: session_id={session_id}")
+    except Exception as e:
+        logger.error(f"[会话删除] 会话删除失败: session_id={session_id}, error={str(e)}", exc_info=True)
