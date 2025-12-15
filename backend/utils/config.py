@@ -132,7 +132,7 @@ class Config:
 
     # 推理服务（ngrok）配置
     INFERENCE_API_BASE_URL = os.getenv(
-        "INFERENCE_API_BASE_URL", "https://nonanesthetized-nolan-riantly.ngrok-free.dev"
+        "INFERENCE_API_BASE_URL", ""
     )
     INFERENCE_API_KEY = os.getenv("INFERENCE_API_KEY", "")
     USE_REMOTE_EMBEDDINGS = os.getenv("USE_REMOTE_EMBEDDINGS", "false").lower() == "true"

@@ -22,7 +22,7 @@ class InferenceConfig:
     # 服务基础配置
     HOST: str = os.getenv("INFERENCE_HOST", "0.0.0.0")
     PORT: int = int(os.getenv("INFERENCE_PORT", "8001"))
-    API_KEY: str = os.getenv("INFERENCE_API_KEY", "78tkUvoIzHRp68I0M97wePh1cbTxzzNu37i")
+    API_KEY: str = os.getenv("INFERENCE_API_KEY", "")
     LOG_LEVEL: str = os.getenv("INFERENCE_LOG_LEVEL", "info")
     REQUEST_TIMEOUT: float = float(os.getenv("INFERENCE_TIMEOUT", "30"))
 
