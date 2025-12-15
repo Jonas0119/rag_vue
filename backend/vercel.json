@@ -6,11 +6,6 @@
       "use": "@vercel/python"
     }
   ],
-  "functions": {
-    "main.py": {
-      "excludeFiles": "{tests,__pycache__,*.pyc,*.log,*.md}/**"
-    }
-  },
   "routes": [
     {
       "src": "/(.*)",
