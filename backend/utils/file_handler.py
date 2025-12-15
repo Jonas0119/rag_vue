@@ -12,7 +12,7 @@ from backend.utils.config import config
 logger = logging.getLogger(__name__)
 
 
-ALLOWED_EXTENSIONS = {'.pdf', '.txt', '.md', '.docx'}
+ALLOWED_EXTENSIONS = {'.pdf'}
 
 
 def get_file_extension(filename: str) -> str:

@@ -43,9 +43,9 @@ class DocumentService:
         Returns:
             (是否成功, 消息)
         """
-        # 验证文件类型
+        # 验证文件类型（当前仅支持 PDF）
         if not is_allowed_file(uploaded_file.name):
-            return False, f"不支持的文件类型。支持的格式：{', '.join(['.pdf', '.txt', '.md', '.docx'])}"
+            return False, "不支持的文件类型。当前仅支持 PDF 文件（.pdf）"
         
         # 验证文件大小
         file_size = uploaded_file.size

@@ -102,11 +102,11 @@ async def upload_document(
     """
     doc_service = get_document_service()
     
-    # 验证文件类型
+    # 验证文件类型（当前仅支持 PDF）
     if not is_allowed_file(file.filename):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支持的文件类型。支持的格式：.pdf, .txt, .md, .docx"
+            detail="不支持的文件类型。当前仅支持 PDF 文件（.pdf）"
         )
     
     # 验证文件大小
