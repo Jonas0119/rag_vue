@@ -12,7 +12,6 @@ from backend.utils.model_downloader import get_model_path
 from .remote_embeddings import RemoteEmbeddings
 
 from langchain_core.documents import Document
-from langchain_huggingface import HuggingFaceEmbeddings
 from backend.utils.performance_monitor import monitor_vector_db
 from .vector_strategies import VectorStoreStrategy, ChromaStrategy, PineconeStrategy
 
@@ -24,7 +23,7 @@ class VectorStoreService:
     
     def __init__(self):
         # 异步加载 Embedding 模型（不阻塞初始化）
-        self.embeddings: Optional[HuggingFaceEmbeddings] = None
+        self.embeddings: Optional[object] = None
         self.strategy: Optional[VectorStoreStrategy] = None
         self._embeddings_loading = False
         self._embeddings_loaded = False
@@ -65,6 +64,10 @@ class VectorStoreService:
                     max_retry=config.INFERENCE_API_MAX_RETRY,
                 )
             else:
+                # 本地 Embedding 模型路径（仅在未启用远程模式时使用）
+                # 注意：在 Vercel 部署中通常不会走到这里，因为推荐使用远程 Embeddings。
+                from langchain_huggingface import HuggingFaceEmbeddings  # type: ignore[import]
+
                 logger.info(
                     f"[向量库服务] 开始加载本地 Embedding 模型: {config.EMBEDDING_MODEL}"
                 )

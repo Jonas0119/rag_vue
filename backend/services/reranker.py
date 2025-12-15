@@ -7,7 +7,6 @@ import logging
 from typing import List, Optional, Dict
 
 import requests
-from sentence_transformers import CrossEncoder
 from langchain_core.documents import Document
 
 from backend.utils.config import config
@@ -31,9 +30,21 @@ class CrossEncoderReranker:
         # 如果未指定模型名称，使用配置中的默认值（中文专用模型）
         if model_name is None:
             model_name = config.RERANKER_MODEL
+        # 懒加载 sentence-transformers，避免在未安装时导入失败
+        try:
+            from sentence_transformers import CrossEncoder  # type: ignore[import]
+        except Exception as e:
+            logger.error(
+                "[Reranker] sentence-transformers 未安装，无法使用本地 CrossEncoderReranker。"
+            )
+            raise ImportError(
+                "sentence-transformers 未安装，本地 CrossEncoderReranker 不可用。"
+                "如果需要在本地加载 rerank 模型，请安装 sentence-transformers。"
+            ) from e
+
         # 优先使用配置的下载源
         download_source = config.MODEL_DOWNLOAD_SOURCE if use_modelscope else "huggingface"
-
+        
         try:
             model_path = get_model_path(model_name, download_source)
             logger.info(f"[Reranker] 正在加载模型: {model_path} (source={download_source})")

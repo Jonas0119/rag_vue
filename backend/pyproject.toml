@@ -32,13 +32,17 @@ dependencies = [
   "email-validator>=2.1.0",
   "jieba>=0.42.1,<1.0.0",
   "rank-bm25>=0.2.2,<1.0.0",
-  "modelscope>=1.9.0,<2.0.0",
   "supabase>=2.0.0,<3.0.0",
   "tuspy>=0.2.4,<1.0.0",
   "psycopg2-binary>=2.9.9,<3.0.0",
   "pinecone>=6.0.0,<7.0.0",
   "langchain-pinecone>=0.2.13,<1.0.0",
 ]
+
+[tool.setuptools]
+# 后端在 Vercel 中作为应用运行，不需要构建/发布为库，
+# 关闭自动包发现以避免 Setuptools 因多目录报错。
+packages = []
 
 [build-system]
 requires = ["setuptools", "wheel"]
