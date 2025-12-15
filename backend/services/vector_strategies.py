@@ -7,13 +7,19 @@ import logging
 from pathlib import Path
 
 from langchain_core.documents import Document
-from langchain_chroma import Chroma
 from backend.utils.config import config
 from backend.utils.performance_monitor import monitor_vector_db
 
 logger = logging.getLogger(__name__)
 
-# Pinecone 相关导入
+# Chroma 相关导入（可选，本地开发使用）
+try:
+    from langchain_chroma import Chroma  # type: ignore[import]
+    CHROMA_AVAILABLE = True
+except ImportError:
+    CHROMA_AVAILABLE = False
+
+# Pinecone 相关导入（云模式）
 try:
     from pinecone import Pinecone, ServerlessSpec
     from langchain_pinecone import PineconeVectorStore
@@ -68,6 +74,12 @@ class ChromaStrategy(VectorStoreStrategy):
     """Chroma 策略"""
     
     def __init__(self, embeddings: Any):
+        if not CHROMA_AVAILABLE:
+            raise ImportError(
+                "未安装 langchain-chroma/chromadb，无法使用本地 Chroma 向量库。\n"
+                "在 Vercel 云部署中，请使用 VECTOR_DB_MODE=cloud（Pinecone），"
+                "本地开发需要 Chroma 时再安装相关依赖。"
+            )
         super().__init__(embeddings)
         self._cache = {}
 
