@@ -4,6 +4,8 @@ RAG 服务 - 检索增强生成
 import os
 import uuid
 import logging
+import asyncio
+import threading
 from typing import List, Dict, Optional, Generator
 import time
 
@@ -13,26 +15,26 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain.messages import HumanMessage, ToolMessage
 
-from backend.utils.config import config
-from backend.utils.prompts import RAG_TEMPLATE, DIRECT_ANSWER_TEMPLATE
-from .vector_store_service import get_vector_store_service
+from rag_service.utils.config import config
+from rag_service.utils.prompts import RAG_TEMPLATE, DIRECT_ANSWER_TEMPLATE
+from rag_service.services.vector_store_service import get_vector_store_service
 
 logger = logging.getLogger(__name__)
 
 # LangGraph RAG（可选）
-from .rag_graph import build_rag_graph
-from .rag_nodes import (
+from rag_service.services.rag_graph import build_rag_graph
+from rag_service.services.rag_nodes import (
     create_generate_query_or_respond_node,
     create_grade_documents_node,
     create_rewrite_question_node,
     create_generate_answer_node,
 )
-from .rag_tools import create_retrieve_tool
-from .hybrid_retriever import HybridRetriever
-from .reranker import CrossEncoderReranker, RemoteReranker
-from .checkpoint_manager import create_checkpointer
-from backend.database import ParentChildDAO
-from backend.utils.token_counter import token_counter
+from rag_service.services.rag_tools import create_retrieve_tool
+from rag_service.services.hybrid_retriever import HybridRetriever
+from rag_service.services.reranker import CrossEncoderReranker
+from rag_service.services.checkpoint_manager import create_checkpointer
+from rag_service.database import ParentChildDAO
+from rag_service.utils.token_counter import token_counter
 
 
 class RAGService:
@@ -99,18 +101,10 @@ class RAGService:
             except Exception:
                 pass
 
-        # reranker（可选）
+        # reranker（可选）- 直接使用本地CrossEncoderReranker（从ModelScope下载）
         reranker = None
         if config.USE_RERANKER:
-            if config.USE_REMOTE_RERANKER and config.INFERENCE_API_BASE_URL:
-                reranker = RemoteReranker(
-                    base_url=config.INFERENCE_API_BASE_URL,
-                    api_key=config.INFERENCE_API_KEY,
-                    timeout=config.INFERENCE_API_TIMEOUT,
-                    max_retry=config.INFERENCE_API_MAX_RETRY,
-                )
-            else:
-                reranker = CrossEncoderReranker()
+            reranker = CrossEncoderReranker()
 
         retrieve_tool = create_retrieve_tool(
             retriever=retriever,
@@ -345,12 +339,42 @@ class RAGService:
             # 如果提供了 thread_id 但未启用 checkpoint，仍然使用（兼容性）
             graph_config = {"configurable": {"thread_id": thread_id}}
 
+        # 节点描述映射
+        NODE_DESCRIPTIONS = {
+            'generate_query_or_respond': {
+                'name': '分析问题',
+                'description': '生成查询或判断是否需要检索'
+            },
+            'retrieve': {
+                'name': '文档检索',
+                'description': '从向量库检索相关文档'
+            },
+            'grade_documents': {
+                'name': '评估文档相关性',
+                'description': '判断检索到的文档是否相关'
+            },
+            'rewrite_question': {
+                'name': '重写问题',
+                'description': '优化查询以提高检索效果'
+            },
+            'generate_answer': {
+                'name': '生成答案',
+                'description': '基于检索上下文生成回答'
+            },
+            'summarize_messages': {
+                'name': '总结消息',
+                'description': '总结历史对话以节省上下文'
+            }
+        }
+        
         # 用于收集最终结果
         final_answer = ""
         retrieved_docs: List[Dict] = []
         tool_text = ""
         thinking_steps = []
         current_step = 1
+        last_node_name = None  # 跟踪上一个节点，用于检测新节点开始
+        last_heartbeat_time = time.time()  # 用于心跳机制
 
         # 流式处理 graph 输出
         logger.info(f"[RAGService] 开始 LangGraph 流式查询，thread_id={thread_id}")
@@ -368,9 +392,44 @@ class RAGService:
             except Exception:
                 pass
         
+        # 发送初始状态（保持连接活跃）
+        logger.info(f"[_query_langgraph_stream] 开始执行 graph.stream()")
+        yield {
+            'type': 'status',
+            'message': '开始处理查询',
+            'timestamp': time.time()
+        }
+        
         for chunk in graph.stream(initial_state, config=graph_config):
+            logger.info(f"[_query_langgraph_stream] graph.stream 返回 chunk: {list(chunk.keys())}")
+            # 检查是否需要发送心跳（每 10 秒发送一次）
+            current_time = time.time()
+            if current_time - last_heartbeat_time > 10.0:
+                yield {
+                    'type': 'status',
+                    'message': '处理中...',
+                    'timestamp': current_time
+                }
+                last_heartbeat_time = current_time
             for node_name, node_update in chunk.items():
-                logger.info(f"[RAGService] LangGraph 节点更新: {node_name}")
+                logger.info(f"[_query_langgraph_stream] 处理节点: {node_name}, last_node={last_node_name}")
+                
+                # 检测新节点开始执行，立即发送 node_start 事件
+                if node_name != last_node_name:
+                    logger.info(f"[_query_langgraph_stream] 发送 node_start 事件: {node_name}")
+                    node_desc = NODE_DESCRIPTIONS.get(node_name, {
+                        'name': node_name,
+                        'description': f'执行节点: {node_name}'
+                    })
+                    yield {
+                        'type': 'node_start',
+                        'node': node_name,
+                        'node_name': node_desc['name'],
+                        'description': node_desc['description'],
+                        'timestamp': time.time()
+                    }
+                    last_node_name = node_name
+                
                 # 处理不同节点的更新
                 if node_name == "generate_query_or_respond":
                     thinking_steps.append({
@@ -380,6 +439,15 @@ class RAGService:
                         "details": " 判断是否文档检索 "
                     })
                     current_step += 1
+                    
+                    # 发送节点完成事件
+                    yield {
+                        'type': 'node_complete',
+                        'node': node_name,
+                        'node_name': NODE_DESCRIPTIONS.get(node_name, {}).get('name', node_name),
+                        'result': {'action': '分析问题', 'status': 'completed'},
+                        'timestamp': time.time()
+                    }
                 
                 elif node_name == "retrieve":
                     # 提取工具返回的文档
@@ -397,8 +465,30 @@ class RAGService:
                         "details": "工具检索完成"
                     })
                     current_step += 1
+                    
+                    # 发送节点完成事件
+                    yield {
+                        'type': 'node_complete',
+                        'node': node_name,
+                        'node_name': NODE_DESCRIPTIONS.get(node_name, {}).get('name', node_name),
+                        'result': {
+                            'action': '文档检索',
+                            'status': 'completed',
+                            'doc_count': len(retrieved_docs)
+                        },
+                        'timestamp': time.time()
+                    }
                 
                 elif node_name == "grade_documents":
+                    # 提取评估结果
+                    grade_result = None
+                    if "messages" in node_update:
+                        for msg in node_update["messages"]:
+                            if hasattr(msg, "content"):
+                                content = str(getattr(msg, "content", "") or "")
+                                if content:
+                                    grade_result = content
+                    
                     thinking_steps.append({
                         "step": current_step,
                         "action": "评估文档相关性",
@@ -406,8 +496,30 @@ class RAGService:
                         "details": "文档相关性评估"
                     })
                     current_step += 1
+                    
+                    # 发送节点完成事件
+                    yield {
+                        'type': 'node_complete',
+                        'node': node_name,
+                        'node_name': NODE_DESCRIPTIONS.get(node_name, {}).get('name', node_name),
+                        'result': {
+                            'action': '评估文档相关性',
+                            'status': 'completed',
+                            'result': grade_result
+                        },
+                        'timestamp': time.time()
+                    }
                 
                 elif node_name == "rewrite_question":
+                    # 提取重写后的问题
+                    rewritten_query = None
+                    if "messages" in node_update:
+                        for msg in node_update["messages"]:
+                            if hasattr(msg, "content"):
+                                content = str(getattr(msg, "content", "") or "")
+                                if content:
+                                    rewritten_query = content
+                    
                     thinking_steps.append({
                         "step": current_step,
                         "action": "重写问题",
@@ -415,6 +527,19 @@ class RAGService:
                         "details": "问题重写"
                     })
                     current_step += 1
+                    
+                    # 发送节点完成事件
+                    yield {
+                        'type': 'node_complete',
+                        'node': node_name,
+                        'node_name': NODE_DESCRIPTIONS.get(node_name, {}).get('name', node_name),
+                        'result': {
+                            'action': '重写问题',
+                            'status': 'completed',
+                            'rewritten_query': rewritten_query
+                        },
+                        'timestamp': time.time()
+                    }
                 
                 elif node_name == "generate_answer":
                     # generate_answer 节点内部已经实现了流式输出
@@ -436,6 +561,41 @@ class RAGService:
                             "details": f"回答长度: {len(final_answer)} 字符"
                         })
                         current_step += 1
+                    
+                    # 发送节点完成事件
+                    yield {
+                        'type': 'node_complete',
+                        'node': node_name,
+                        'node_name': NODE_DESCRIPTIONS.get(node_name, {}).get('name', node_name),
+                        'result': {
+                            'action': '生成答案',
+                            'status': 'completed',
+                            'answer_length': len(final_answer) if final_answer else 0
+                        },
+                        'timestamp': time.time()
+                    }
+                
+                elif node_name == "summarize_messages":
+                    # 处理总结消息节点
+                    thinking_steps.append({
+                        "step": current_step,
+                        "action": "总结消息",
+                        "description": "总结历史对话以节省上下文",
+                        "details": "消息总结完成"
+                    })
+                    current_step += 1
+                    
+                    # 发送节点完成事件
+                    yield {
+                        'type': 'node_complete',
+                        'node': node_name,
+                        'node_name': NODE_DESCRIPTIONS.get(node_name, {}).get('name', node_name),
+                        'result': {
+                            'action': '总结消息',
+                            'status': 'completed'
+                        },
+                        'timestamp': time.time()
+                    }
 
         elapsed_time = time.time() - start_time
 
@@ -706,9 +866,12 @@ class RAGService:
         # LangGraph 路径（可选）：当前为了保持接口兼容，采用“先求完整答案，再分片输出”的方式
         # LangGraph 路径（可选）：使用真正的流式输出
         if config.USE_LANGGRAPH_RAG:
+            logger.info(f"[RAG Service] 使用 LangGraph 流式查询, user_id={user_id}, question={question[:50]}...")
             for response in self._query_langgraph_stream(user_id, question, thread_id=thread_id):
                 yield response
             return
+        
+        logger.info(f"[RAG Service] 使用普通 RAG 流式查询, user_id={user_id}, question={question[:50]}...")
 
         start_time = time.time()
         

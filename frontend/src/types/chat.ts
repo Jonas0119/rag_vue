@@ -40,7 +40,8 @@ export interface ChatMessageRequest {
 }
 
 export interface SSEChunk {
-  type: 'chunk' | 'complete' | 'error' | 'thinking'
+  type: 'chunk' | 'complete' | 'error' | 'thinking' | 
+        'node_start' | 'node_progress' | 'node_complete' | 'status'
   content?: string
   answer?: string
   session_id?: string
@@ -49,4 +50,12 @@ export interface SSEChunk {
   message?: string
   data?: any
   tokens_used?: number
+  
+  // 新增字段（用于节点状态事件）
+  node?: string           // 节点名称
+  node_name?: string     // 节点友好名称
+  description?: string   // 节点描述
+  result?: any           // 节点执行结果
+  timestamp?: number     // 时间戳
+  progress?: number      // 进度百分比（0-100）
 }

@@ -9,9 +9,9 @@ import uuid
 from pydantic import BaseModel, Field
 from langchain.messages import HumanMessage, ToolMessage, SystemMessage, AIMessage
 
-from .rag_state import RAGState
-from backend.utils.token_counter import token_counter
-from backend.utils.config import config
+from rag_service.services.rag_state import RAGState
+from rag_service.utils.token_counter import token_counter
+from rag_service.utils.config import config
 
 logger = logging.getLogger(__name__)
 

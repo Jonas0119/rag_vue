@@ -31,22 +31,10 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期管理"""
-    # 启动时执行
-    logger.info("🚀 FastAPI 应用启动中...")
-    
-    # 预加载 Embedding 模型（后台加载，不阻塞启动）
-    try:
-        from backend.services import get_vector_store_service
-        _ = get_vector_store_service()
-        logger.info("✅ Embedding 模型后台加载已触发")
-    except Exception as e:
-        logger.warning(f"⚠️ Embedding 模型加载失败: {str(e)}")
-    
+    """应用生命周期管理（Backend 仅作为轻量网关，不加载任何模型）"""
+    logger.info("🚀 FastAPI 网关启动中...")
     yield
-    
-    # 关闭时执行
-    logger.info("🛑 FastAPI 应用关闭中...")
+    logger.info("🛑 FastAPI 网关关闭中...")
 
 
 # 创建 FastAPI 应用

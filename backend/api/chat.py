@@ -1,16 +1,18 @@
 """
-对话 API 路由 - 支持 SSE 流式输出
+对话 API 路由 - 代理转发到 RAG Service
 """
 import json
 import logging
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+import httpx
 
 from backend.core.dependencies import get_current_user_dependency
 from backend.database.models import User
-from backend.services import get_rag_service, get_session_service
+from backend.services import get_session_service
+from backend.utils.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -47,138 +49,89 @@ class MessageResponse(BaseModel):
 @router.post("/chat/message")
 async def send_message(
     request: ChatMessageRequest,
-    user: User = Depends(get_current_user_dependency)
+    user: User = Depends(get_current_user_dependency),
 ):
     """
-    发送消息并返回 SSE 流式响应
-    
+    发送消息：backend 负责保存用户消息，并以普通 HTTP 方式调用 RAG Service。
+
     Returns:
-        SSE 流，包含 chunk、complete、error 事件
+        简单 JSON：
+        {
+            "success": true,
+            "session_id": "...",
+        }
     """
-    rag_service = get_rag_service()
+    if not config.RAG_SERVICE_URL:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="RAG Service URL 未配置",
+        )
+
     session_service = get_session_service()
-    
-    # 获取或创建 session_id
+
+    # 获取或创建 session_id（在 backend 处理）
     session_id = request.session_id
     if not session_id:
         # 创建新会话
         session_id = session_service.create_session(user.user_id, request.message)
-        # 保存用户消息
-        session_service.save_message(
-            session_id=session_id,
-            role='user',
-            content=request.message
-        )
-    else:
-        # 继续现有会话，保存用户消息
-        session_service.save_message(
-            session_id=session_id,
-            role='user',
-            content=request.message
-        )
-    
-    # 获取 thread_id（用于多轮对话 checkpoint）
-    thread_id = None
-    if session_id:
-        thread_id = f"user_{user.user_id}_session_{session_id}"
-    
-    async def generate_sse_stream():
-        """生成 SSE 流"""
-        try:
-            current_answer = ""
-            retrieved_docs = []
-            thinking_process = []
-            
-            # 调用 RAG 服务的流式查询
-            for response in rag_service.query_stream(
-                user.user_id,
-                request.message,
-                thread_id=thread_id
-            ):
-                response_type = response.get('type')
-                
-                if response_type == 'chunk':
-                    # 流式文本块
-                    content = response.get('content', '')
-                    if content:
-                        current_answer += content
-                        # 发送 chunk 事件
-                        data = {
-                            "type": "chunk",
-                            "content": content,
-                            "session_id": session_id
-                        }
-                        yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-                
-                elif response_type == 'thinking':
-                    # 思考过程更新
-                    thinking_steps = response.get('thinking_process', [])
-                    if thinking_steps:
-                        thinking_process.extend(thinking_steps)
-                        data = {
-                            "type": "thinking",
-                            "data": thinking_steps,
-                            "session_id": session_id
-                        }
-                        yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-                
-                elif response_type == 'complete':
-                    # 生成完成
-                    answer = response.get('answer', current_answer)
-                    retrieved_docs = response.get('retrieved_docs', [])
-                    thinking_process = response.get('thinking_process', thinking_process)
-                    
-                    # 保存 AI 回复到数据库
-                    session_service.save_message(
-                        session_id=session_id,
-                        role='assistant',
-                        content=answer,
-                        retrieved_docs=retrieved_docs,
-                        thinking_process=thinking_process,
-                        tokens_used=response.get('tokens_used', 0)
-                    )
-                    
-                    # 发送 complete 事件
-                    data = {
-                        "type": "complete",
-                        "answer": answer,
-                        "session_id": session_id,
-                        "retrieved_docs": retrieved_docs,
-                        "thinking_process": thinking_process,
-                        "tokens_used": response.get('tokens_used', 0)
-                    }
-                    yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-                    break
-                
-                elif response_type == 'error':
-                    # 错误处理
-                    error_msg = response.get('error', '未知错误')
-                    data = {
-                        "type": "error",
-                        "message": error_msg,
-                        "session_id": session_id
-                    }
-                    yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-                    break
-        
-        except Exception as e:
-            logger.error(f"流式生成错误: {str(e)}", exc_info=True)
-            error_data = {
-                "type": "error",
-                "message": f"生成回答时发生错误: {str(e)}",
-                "session_id": session_id
-            }
-            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
-    
-    return StreamingResponse(
-        generate_sse_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # 禁用 Nginx 缓冲
-        }
+
+    # 无论新会话还是旧会话，都在 backend 保存一条用户消息
+    session_service.save_message(
+        session_id=session_id,
+        role="user",
+        content=request.message,
     )
+
+    # 转发请求到 RAG Service（普通 POST）
+    rag_service_url = config.RAG_SERVICE_URL.rstrip("/")
+    target_url = f"{rag_service_url}/api/chat/message"
+
+    forward_request = {
+        "message": request.message,
+        "session_id": session_id,
+        "user_id": user.user_id,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                target_url,
+                json=forward_request,
+                headers={"Content-Type": "application/json"},
+            )
+    except httpx.RequestError as exc:
+        logger.error(f"调用 RAG Service 失败: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="无法连接 RAG Service，请稍后重试",
+        )
+
+    if response.status_code != 200:
+        logger.error(
+            "RAG Service 返回错误: status=%s, body=%s",
+            response.status_code,
+            response.text,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"RAG Service 错误: {response.text}",
+        )
+
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+
+    if not data.get("success", True):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=data.get("message", "RAG Service 处理失败"),
+        )
+
+    return {
+        "success": True,
+        "session_id": session_id,
+    }
 
 
 @router.get("/chat/sessions", response_model=list[SessionResponse])
@@ -255,16 +208,10 @@ async def create_session(
 @router.delete("/chat/sessions/{session_id}")
 async def delete_session(
     session_id: str,
-    background_tasks: BackgroundTasks,
     user: User = Depends(get_current_user_dependency)
 ):
     """
-    删除会话（异步删除，立即返回）
-    
-    使用乐观更新策略：
-    1. 快速验证会话存在且属于当前用户（O(1) 查询）
-    2. 立即返回成功，后台异步删除
-    3. 数据库 CASCADE 会自动删除相关消息
+    删除会话
     
     Returns:
         成功消息
@@ -272,7 +219,7 @@ async def delete_session(
     from backend.database import SessionDAO
     session_dao = SessionDAO()
     
-    # 优化验证：直接查询单个会话（O(1) 而不是 O(n)）
+    # 验证会话存在且属于当前用户
     session = session_dao.get_session(session_id)
     
     if not session:
@@ -288,31 +235,10 @@ async def delete_session(
             detail="无权删除该会话"
         )
     
-    # 异步删除会话（数据库 CASCADE 会自动删除消息）
-    background_tasks.add_task(
-        _delete_session_background,
-        session_id
-    )
+    # 删除会话
+    session_dao.delete_session(session_id)
     
-    # 立即返回成功（乐观更新）
     return {"success": True, "message": "会话已删除"}
-
-
-def _delete_session_background(session_id: str):
-    """
-    后台删除会话（数据库 CASCADE 会自动删除消息）
-    
-    Args:
-        session_id: 会话 ID
-    """
-    try:
-        logger.info(f"[会话删除] 后台删除会话: session_id={session_id}")
-        from backend.database import SessionDAO
-        session_dao = SessionDAO()
-        session_dao.delete_session(session_id)
-        logger.info(f"[会话删除] 会话删除成功: session_id={session_id}")
-    except Exception as e:
-        logger.error(f"[会话删除] 会话删除失败: session_id={session_id}, error={str(e)}", exc_info=True)
 
 
 @router.get("/chat/sessions/{session_id}/messages", response_model=list[MessageResponse])

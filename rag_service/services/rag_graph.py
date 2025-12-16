@@ -6,7 +6,7 @@ Graph 构建模块
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from .rag_state import RAGState
+from rag_service.services.rag_state import RAGState
 
 
 def build_rag_graph(

@@ -1,12 +1,28 @@
-# RAG 智能问答系统
+## RAG 智能问答系统
 
 这是一个基于 RAG (Retrieval-Augmented Generation) 的智能问答系统，支持多文档对话、知识库管理等功能。
 
-## 技术栈
+### 技术栈与整体架构
 
-- **前端**: Vue 3 + TypeScript + Vite
-- **后端**: FastAPI (Python)
-- **部署**: Vercel (前端静态部署 + 后端 Serverless Functions)
+- **前端**: Vue 3 + TypeScript + Vite（部署到 Vercel）
+- **Backend（Vercel 网关）**: FastAPI + Mangum（Serverless Functions）
+- **rag_service（本地 RAG 服务）**: FastAPI + LangChain + LangGraph
+
+整体架构：
+
+```mermaid
+flowchart TB
+  Frontend["前端(Vue/Vercel)"] --> Backend["backend API 网关(Vercel)"]
+  Backend -->|"/api/auth/*"| AuthApi["auth.py"]
+  Backend -->|"/api/documents/*"| DocsApi["documents.py"]
+  Backend -->|"/api/sessions/*"| SessionsApi["sessions.py"]
+  Backend -->|"/api/chat/*"| ChatProxy["chat.py 代理"]
+  ChatProxy -->|"HTTP/SSE, {RAG_SERVICE_URL}"| RagService["rag_service 本地 RAG"]
+  DocsApi -->|"/api/documents/{id}/process 代理"| RagService
+  RagService --> DB["数据库(Supabase/Postgres)"]
+  RagService --> VS["向量库(Pinecone/Chroma)"]
+  RagService --> Storage["Supabase Storage"]
+```
 
 ## 功能特点
 
@@ -18,24 +34,28 @@
 
 ## 项目结构
 
-```
-rag/
-├── frontend/          # Vue 3 + TypeScript 前端
-│   ├── src/           # 源代码
-│   │   ├── api/       # API 客户端
-│   │   ├── components/# Vue 组件
-│   │   ├── stores/    # Pinia 状态管理
-│   │   ├── views/      # 页面视图
-│   │   └── utils/      # 工具函数
-│   └── package.json   # 前端依赖
-├── backend/           # FastAPI 后端
-│   ├── api/           # API 路由
-│   ├── core/          # 核心配置
-│   ├── services/      # 业务服务层
-│   ├── database/      # 数据库层
-│   ├── utils/         # 工具函数
-│   └── tests/         # 测试文件
-└── pyproject.toml     # Python 依赖管理
+```text
+rag_vue/
+├── frontend/           # Vue 3 + TS 前端（Vercel 部署）
+│   └── ...             # 详见 frontend 目录
+├── backend/            # Vercel 轻量网关（FastAPI + Mangum）
+│   ├── api/            # 认证/文档元数据/会话/RAG 代理路由
+│   ├── core/           # 配置、依赖注入、中间件
+│   ├── services/       # 用户/会话/文档元数据服务（无 RAG 逻辑）
+│   ├── database/       # DAO 与模型
+│   ├── utils/          # 通用工具（无向量/模型逻辑）
+│   ├── pyproject.toml  # backend 独立依赖
+│   ├── README.md       # backend 说明
+│   └── DEPLOYMENT.md   # backend 部署文档（Vercel）
+├── rag_service/        # 本地 RAG 服务（FastAPI + LangGraph）
+│   ├── api/            # /api/chat/message, /api/documents/* 等
+│   ├── services/       # RAG 核心逻辑、向量库、文档处理
+│   ├── utils/          # 配置、模型下载、分块、清洗等
+│   ├── database/       # 复用 DAO（访问同一数据库）
+│   ├── pyproject.toml  # rag_service 独立依赖
+│   ├── README.md       # rag_service 说明
+│   └── DEPLOYMENT.md   # rag_service 部署文档
+└── pyproject.toml      # 根 pyproject，仅声明 Python 版本（依赖在子项目中管理）
 ```
 
 ## 快速开始
@@ -47,25 +67,16 @@ rag/
 - Poetry (Python 包管理)
 - npm 或 yarn
 
-### 后端启动
+### backend 启动（本地）
 
 ```bash
-# 1. 安装依赖
-poetry install
-
-# 2. 配置环境变量
-# 复制 backend/config_template.txt 创建 backend/.env 文件，并填入必要的配置
-# cd backend && cp config_template.txt .env
-
-# 3. 启动后端（方法1：从项目根目录，推荐）
-uvicorn backend.main:app --reload
-
-# 方法2：使用 run.py 脚本
 cd backend
-python run.py
+pip install .
+# 配置 backend/.env，参考 backend/DEPLOYMENT.md 或 config_template.txt
+uvicorn backend.main:app --reload
 ```
 
-后端将在 `http://localhost:8000` 启动
+backend 默认在 `http://localhost:8000` 启动。
 
 访问 API 文档：
 - Swagger UI: http://localhost:8000/docs

@@ -234,29 +234,62 @@ async def upload_document(
 
 def process_document_background(user_id: int, doc_id: str, filepath: str, file_ext: str):
     """
-    后台处理文档（解析、分块、向量化）
+    后台处理文档（转发到 RAG Service）
     
     这个函数在后台任务中运行，不阻塞 API 响应。
     """
     logger.info(f"[后台任务] 开始处理文档 doc_id={doc_id}, user_id={user_id}")
     
+    from backend.utils.config import config as app_config
+    
+    if not app_config.RAG_SERVICE_URL:
+        logger.error("[后台任务] RAG_SERVICE_URL 未配置，无法处理文档")
+        from backend.database import DocumentDAO
+        doc_dao = DocumentDAO()
+        doc_dao.mark_document_error(doc_id, "RAG Service URL 未配置")
+        return
+    
     try:
-        # 在后台任务中重新获取服务实例
-        from backend.services import get_document_service
-        doc_service = get_document_service()
+        import httpx
         
-        # 调用处理文档的方法（私有方法，但可以通过实例访问）
-        success, message = doc_service._process_document(user_id, doc_id, filepath, file_ext)
+        rag_service_url = app_config.RAG_SERVICE_URL.rstrip("/")
+        target_url = f"{rag_service_url}/api/documents/{doc_id}/process"
         
-        if success:
-            chunk_count = int(message)
-            logger.info(f"[后台任务] 文档 {doc_id} 处理成功: {chunk_count} 个文本块")
-        else:
-            # 标记文档为错误状态
-            from backend.database import DocumentDAO
-            doc_dao = DocumentDAO()
-            doc_dao.mark_document_error(doc_id, message)
-            logger.error(f"[后台任务] 文档 {doc_id} 处理失败: {message}")
+        # 构建请求体
+        request_body = {
+            "doc_id": doc_id,
+            "user_id": user_id,
+            "filepath": filepath,
+            "file_type": file_ext
+        }
+        
+        # 转发请求到 RAG Service（异步处理模式：立即返回，不等待处理完成）
+        with httpx.Client(timeout=30.0) as client:  # 减少超时时间，因为现在应该立即返回
+            response = client.post(
+                target_url,
+                json=request_body,
+                headers={"Content-Type": "application/json"}
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            if result.get("success"):
+                # 异步处理模式：rag_service 立即返回，实际处理在后台进行
+                # 前端可以通过轮询 /api/documents/{doc_id}/status 获取处理状态
+                logger.info(f"[后台任务] 文档 {doc_id} 处理任务已启动，正在后台处理中")
+                # 不需要等待处理完成，状态会通过数据库更新
+            else:
+                error_msg = result.get("detail", "未知错误")
+                from backend.database import DocumentDAO
+                doc_dao = DocumentDAO()
+                doc_dao.mark_document_error(doc_id, error_msg)
+                logger.error(f"[后台任务] 文档 {doc_id} 启动处理任务失败: {error_msg}")
+    
+    except httpx.TimeoutException:
+        logger.error(f"[后台任务] 文档 {doc_id} 处理超时")
+        from backend.database import DocumentDAO
+        doc_dao = DocumentDAO()
+        doc_dao.mark_document_error(doc_id, "处理超时")
     except Exception as e:
         logger.error(f"[后台任务] 文档 {doc_id} 处理异常: {str(e)}", exc_info=True)
         # 标记文档为错误状态
@@ -299,7 +332,7 @@ async def delete_document(
             detail="无权删除该文档"
         )
     
-    # 删除文档（支持删除任何状态的文档）
+    # 删除文档元数据
     success, message = doc_service.delete_document(user.user_id, doc_id)
     
     if not success:
@@ -307,6 +340,26 @@ async def delete_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=message
         )
+    
+    # 转发删除向量请求到 RAG Service
+    from backend.utils.config import config as app_config
+    if app_config.RAG_SERVICE_URL:
+        try:
+            import httpx
+            rag_service_url = app_config.RAG_SERVICE_URL.rstrip("/")
+            target_url = f"{rag_service_url}/api/documents/{doc_id}/delete-vectors"
+            
+            # 异步删除向量（不阻塞响应）
+            with httpx.Client(timeout=30.0) as client:
+                response = client.delete(
+                    target_url,
+                    params={"user_id": user.user_id}
+                )
+                # 即使删除向量失败，也不影响删除元数据的成功
+                if response.status_code != 200:
+                    logger.warning(f"删除向量失败: {response.text}")
+        except Exception as e:
+            logger.warning(f"删除向量时发生错误（不影响文档删除）: {str(e)}")
     
     return {
         "success": True,

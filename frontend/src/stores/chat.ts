@@ -4,7 +4,18 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { chatApi } from '@/api/chat'
-import type { Message, Session, ChatMessageRequest, SSEChunk } from '@/types/chat'
+import type { Message, Session, ChatMessageRequest } from '@/types/chat'
+
+// 节点状态接口
+interface NodeStatus {
+  node: string
+  node_name: string
+  description: string
+  status: 'pending' | 'running' | 'completed' | 'error'
+  progress?: number
+  result?: any
+  timestamp?: number
+}
 
 export const useChatStore = defineStore('chat', () => {
   const currentSessionId = ref<string | null>(null)
@@ -12,7 +23,10 @@ export const useChatStore = defineStore('chat', () => {
   const messages = ref<Message[]>([])
   const currentMessage = ref<string>('')
   const isStreaming = ref(false)
-  const streamingController = ref<{ close: () => void } | null>(null)
+  const hasTimeout = ref(false)
+  const activeNodes = ref<NodeStatus[]>([])  // 当前执行的节点列表
+  // 轮询控制
+  let pollingAbort = { aborted: false }
 
   /**
    * 当前会话
@@ -30,6 +44,8 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value = []
     messages.value = []
     currentMessage.value = ''
+    activeNodes.value = []
+    hasTimeout.value = false
     stopStreaming()
   }
 
@@ -134,57 +150,29 @@ export const useChatStore = defineStore('chat', () => {
     }
     messages.value.push(aiMessage)
 
-    // 开始流式接收
+    // 开始后台处理 + 轮询
     isStreaming.value = true
+    hasTimeout.value = false
     currentMessage.value = ''
+    pollingAbort.aborted = false
 
     const request: ChatMessageRequest = {
       message,
       session_id: currentSessionId.value
     }
 
-    streamingController.value = chatApi.sendMessage(
-      request,
-      (chunk: SSEChunk) => {
-        if (chunk.type === 'chunk' && chunk.content) {
-          // 追加内容
-          currentMessage.value += chunk.content
-          aiMessage.content = currentMessage.value
-        } else if (chunk.type === 'complete') {
-          // 完成
-          isStreaming.value = false
-          if (chunk.answer) {
-            aiMessage.content = chunk.answer
-          }
-          if (chunk.retrieved_docs) {
-            aiMessage.retrieved_docs = chunk.retrieved_docs
-          }
-          if (chunk.thinking_process) {
-            aiMessage.thinking_process = chunk.thinking_process
-          }
-          currentMessage.value = ''
-          
-          // 消息完成后，重新获取会话列表以同步后端的最新计数
-          // 这样可以确保计数与数据库中的实际值一致
-          if (currentSessionId.value) {
-            // 异步更新，不阻塞 UI
-            fetchSessions().catch(err => {
-              console.error('更新会话列表失败:', err)
-            })
-          }
-        } else if (chunk.type === 'error') {
-          // 错误
-          isStreaming.value = false
-          aiMessage.content = `错误: ${chunk.message || '未知错误'}`
-          currentMessage.value = ''
-        }
-      },
-      (error) => {
-        isStreaming.value = false
-        aiMessage.content = `错误: ${error.message}`
-        currentMessage.value = ''
+    try {
+      await chatApi.sendMessage(request)
+      // 后端 / RAG Service 已接受，开始轮询答案
+      if (currentSessionId.value) {
+        startPollingForAnswer(currentSessionId.value)
       }
-    )
+    } catch (error: any) {
+      console.error('[ChatStore] 发送消息失败:', error)
+      isStreaming.value = false
+      hasTimeout.value = false
+      aiMessage.content = `错误: ${error.message || '发送失败，请稍后重试'}`
+    }
   }
 
   /**
@@ -221,14 +209,12 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /**
-   * 停止流式输出
+   * 停止当前“思考中”状态和轮询
    */
   function stopStreaming(): void {
-    if (streamingController.value) {
-      streamingController.value.close()
-      streamingController.value = null
-      isStreaming.value = false
-    }
+    isStreaming.value = false
+    activeNodes.value = []
+    pollingAbort.aborted = true
   }
 
   /**
@@ -278,12 +264,78 @@ export const useChatStore = defineStore('chat', () => {
     stopStreaming()
   }
 
+  /**
+   * 轮询获取回答：10s -> 5s -> 3s -> 每 2s，最长 60s
+   */
+  async function startPollingForAnswer(sessionId: string): Promise<void> {
+    const delays = [10000, 5000, 3000]
+    const steadyDelay = 2000
+    const maxDuration = 60000
+    const startTime = Date.now()
+    let delayIndex = 0
+
+    while (true) {
+      if (pollingAbort.aborted) {
+        return
+      }
+
+      const now = Date.now()
+      if (now - startTime >= maxDuration) {
+        isStreaming.value = false
+        hasTimeout.value = true
+        return
+      }
+
+      const delay = delayIndex < delays.length ? delays[delayIndex] : steadyDelay
+      delayIndex += 1
+
+      await new Promise(resolve => setTimeout(resolve, delay))
+      if (pollingAbort.aborted) {
+        return
+      }
+
+      try {
+        await fetchSessionMessages(sessionId)
+      } catch (error) {
+        console.error('[ChatStore] 轮询获取消息失败:', error)
+        // 失败时继续下一轮，避免因为偶发错误终止
+        continue
+      }
+
+      // 检查该会话最新一条消息是否为 assistant 且有内容
+      const sessionMessages = messages.value.filter(m => m.session_id === sessionId)
+      const last = sessionMessages[sessionMessages.length - 1]
+      if (last && last.role === 'assistant' && last.content && last.content.trim()) {
+        isStreaming.value = false
+        hasTimeout.value = false
+        // 异步刷新会话列表同步计数
+        fetchSessions().catch(err => console.error('更新会话列表失败:', err))
+        return
+      }
+    }
+  }
+
+  /**
+   * 在超时时重试上一条用户问题
+   */
+  async function retryLastQuestion(): Promise<void> {
+    if (!currentSessionId.value) return
+    const sessionMessages = messages.value.filter(m => m.session_id === currentSessionId.value)
+    const lastUser = [...sessionMessages].reverse().find(m => m.role === 'user' && m.content && m.content.trim())
+    if (!lastUser) return
+
+    hasTimeout.value = false
+    await sendMessage(lastUser.content)
+  }
+
   return {
     currentSessionId,
     sessions,
     messages,
     currentMessage,
     isStreaming,
+    hasTimeout,
+    activeNodes,
     currentSession,
     fetchSessions,
     loadLatestSession,
@@ -291,6 +343,7 @@ export const useChatStore = defineStore('chat', () => {
     selectSession,
     fetchSessionMessages,
     sendMessage,
+    retryLastQuestion,
     deleteMessage,
     stopStreaming,
     deleteSession,

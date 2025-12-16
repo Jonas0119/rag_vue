@@ -7,8 +7,7 @@ import logging
 from pathlib import Path
 
 from langchain_core.documents import Document
-from backend.utils.config import config
-from backend.utils.performance_monitor import monitor_vector_db
+from rag_service.utils.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -159,12 +158,26 @@ class PineconeStrategy(VectorStoreStrategy):
         if cache_key in self._cache:
             return self._cache[cache_key]
         
+        # 创建 Pinecone 客户端（新版本 SDK v3+ 不需要 PINECONE_ENVIRONMENT）
+        # 确保使用正确的 API key，避免 SSL 证书验证问题
         pc = Pinecone(api_key=config.PINECONE_API_KEY)
         index_name = config.PINECONE_INDEX_NAME
         
         # 检查/创建 Index 逻辑简化，假设已存在或自动创建
         # 实际生产中最好在部署脚本中处理 Index 创建
         
+        # 正确初始化 PineconeVectorStore
+        # 尝试显式传入 pinecone_client（如果支持），否则使用默认方式
+        try:
+            vectorstore = PineconeVectorStore(
+                index_name=index_name,
+                embedding=self.embeddings,
+                pinecone_client=pc  # 显式传入客户端实例，避免 SSL 问题
+            )
+        except TypeError:
+            # 如果 pinecone_client 参数不支持，回退到默认方式
+            # 但需要确保环境变量 PINECONE_API_KEY 已设置
+            logger.warning("[PineconeStrategy] pinecone_client 参数不支持，使用默认初始化方式")
         vectorstore = PineconeVectorStore(
             index_name=index_name,
             embedding=self.embeddings
@@ -205,7 +218,7 @@ class PineconeStrategy(VectorStoreStrategy):
     def get_document_count(self, user_id: int) -> int:
         # 优化：优先使用数据库统计，因为 Pinecone 统计复杂且昂贵
         try:
-            from backend.database import DocumentDAO
+            from rag_service.database import DocumentDAO
             doc_dao = DocumentDAO()
             return doc_dao.get_total_chunk_count(user_id, status='active')
         except Exception as e:

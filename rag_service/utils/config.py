@@ -11,11 +11,13 @@ import os
 from dotenv import load_dotenv
 
 # 加载环境变量
-# 本地运行：从 backend/.env 文件加载
+# 本地运行：从 rag_service/.env 或 backend/.env 文件加载
 # 云部署：从环境变量加载（.env 不存在时静默失败）
 from pathlib import Path
-BACKEND_DIR = Path(__file__).parent.parent
-load_dotenv(BACKEND_DIR / ".env", override=False)  # override=False 确保环境变量优先级：系统环境变量 > .env 文件
+RAG_SERVICE_DIR = Path(__file__).parent.parent
+# 优先加载rag_service/.env
+if (RAG_SERVICE_DIR / ".env").exists():
+    load_dotenv(RAG_SERVICE_DIR / ".env", override=False)
 
 # 在 Streamlit Cloud 中，Secrets 会自动加载到 st.secrets
 # 这里将 st.secrets 中的值合并到环境变量（如果存在）
@@ -166,9 +168,6 @@ class Config:
     PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
     PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT", "")
     PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "rag-system")
-    
-    # ==================== RAG Service 配置 ====================
-    RAG_SERVICE_URL = os.getenv("RAG_SERVICE_URL", "")  # ngrok地址，例如：https://xxx.ngrok-free.dev
 
 
 # 全局配置实例

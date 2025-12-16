@@ -1,55 +1,12 @@
 [tool.poetry]
-name = "rag-system"
+name = "rag-vue-monorepo"
 version = "1.0.0"
-description = "RAG 智能问答系统 - 基于 LangChain + Chroma + MiniMax 的多用户智能文档问答系统"
+description = "RAG 智能问答系统 - 前端 + Vercel 后端网关 + 本地 RAG Service 的多项目仓库"
 authors = ["Jonas"]
 package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.14"
-langchain = "^1.0.0"
-langchain-anthropic = "^1.0.0"
-langchain-core = "^1.0.0"
-anthropic = "^0.69.0"
-langchain-community = "^0.4.1"
-filelock = "^3.20.0"
-chromadb = "^1.3.4"
-langchain-chroma = "^1.0.0"
-pypdf = "^6.2.0"
-sentence-transformers = "^5.1.2"
-langchain-huggingface = "^1.0.1"
-langgraph = "^1.0.0"
-langgraph-checkpoint-sqlite = "^2.0.11"  # 需要 >=2.0.11 以兼容 langgraph-checkpoint >=2.1.0
-tenacity = "^9.1.2"
-bcrypt = "^5.0.0"
-pyjwt = "^2.10.1"
-python-dotenv = "^1.2.1"
-python-multipart = "^0.0.20"
-# FastAPI 相关依赖
-fastapi = "^0.115.0"
-uvicorn = {extras = ["standard"], version = "^0.32.0"}
-mangum = "^0.18.0"  # Vercel Serverless Functions 适配器
-pydantic = {extras = ["email"], version = "^2.9.0"}
-pydantic-settings = "^2.5.0"
-email-validator = ">=2.1.0"
-# 中文分词支持（用于 BM25 检索器）
-jieba = "^0.42.1"
-# BM25 检索器依赖（用于 HybridRetriever）
-rank-bm25 = "^0.2.2"
-# ModelScope SDK（用于从 ModelScope 下载模型）
-modelscope = "^1.9.0"
-# ===== 云服务依赖（可选，仅在 cloud 模式下需要）=====
-# Supabase Storage 依赖（STORAGE_MODE=cloud 时需要）
-supabase = "^2.0.0"
-# TUS 客户端（用于大文件分块上传）
-tuspy = "^0.2.4"
-# PostgreSQL 依赖（DATABASE_MODE=cloud 时需要）
-psycopg2-binary = "^2.9.9"
-# Pinecone 依赖（VECTOR_DB_MODE=cloud 时需要）
-# 使用最新版本 langchain-pinecone 0.2.x（兼容 langchain-core 1.0.0）
-# 注意：Pinecone 官方包已重命名，从 pinecone-client 改为 pinecone
-pinecone = "^6.0.0"
-langchain-pinecone = "^0.2.13"
 
 [build-system]
 requires = ["poetry-core"]

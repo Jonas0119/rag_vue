@@ -6,9 +6,6 @@ import logging
 from typing import Optional, List, Tuple
 from pathlib import Path
 
-from langchain_community.document_loaders import PyPDFLoader, TextLoader
-from langchain_core.documents import Document
-
 from backend.database import DocumentDAO
 
 logger = logging.getLogger(__name__)
@@ -16,12 +13,7 @@ from backend.utils.file_handler import (
     is_allowed_file, validate_file_size, generate_safe_filename,
     save_uploaded_file, delete_file, read_text_file, format_file_size
 )
-from backend.utils.text_splitter import split_by_paragraphs
 from backend.utils.config import config
-from .vector_store_service import get_vector_store_service
-from backend.utils.document_cleaner import clean_text
-from backend.utils.parent_child_splitter import split_to_parent_child
-from backend.database import ParentChildDAO
 
 
 class DocumentService:
@@ -29,8 +21,6 @@ class DocumentService:
     
     def __init__(self):
         self.doc_dao = DocumentDAO()
-        self.parent_child_dao = ParentChildDAO()
-        self.vector_service = get_vector_store_service()
     
     def upload_document(self, user_id: int, uploaded_file) -> Tuple[bool, str]:
         """
@@ -89,18 +79,10 @@ class DocumentService:
                 vector_collection=vector_collection
             )
             
-            # 异步处理文档（解析、分块、向量化）
-            success, message = self._process_document(user_id, doc_id, filepath, file_ext)
-            
-            if success:
-                chunk_count = int(message)
-                logger.info(f"[文档上传] 文件 {uploaded_file.name} 处理成功: 大小={format_file_size(file_size)}, 向量块={chunk_count}")
-                return True, f"文档上传成功！共生成 {message} 个文本块"
-            else:
-                # 标记文档为错误状态
-                self.doc_dao.mark_document_error(doc_id, message)
-                logger.error(f"[文档上传] 文件 {uploaded_file.name} 处理失败: {message}")
-                return False, f"文档处理失败：{message}"
+            # 文档处理已迁移到 RAG Service，在 api/documents.py 中通过后台任务转发
+            # 这里只返回成功，文档处理在后台进行
+            logger.info(f"[文档上传] 文件 {uploaded_file.name} 上传成功，等待后台处理")
+            return True, f"文档上传成功，正在后台处理中..."
         
         except Exception as e:
             # 删除已保存的文件
@@ -322,16 +304,8 @@ class DocumentService:
                 logger.warning(f"[文档删除] 权限验证失败: doc_id={doc_id}, doc.user_id={doc.user_id}, request.user_id={user_id}")
                 return False, "无权删除该文档"
             
-            # 2. 从向量库删除（如果文档已向量化）
-            try:
-                if doc.status == 'active' and doc.chunk_count > 0:
-                    logger.info(f"[文档删除] 删除向量: doc_id={doc_id}, chunk_count={doc.chunk_count}")
-                    self.vector_service.delete_documents(user_id, doc_id)
-                else:
-                    logger.info(f"[文档删除] 跳过向量删除: doc_id={doc_id}, status={doc.status}, chunk_count={doc.chunk_count}")
-            except Exception as e:
-                logger.warning(f"[文档删除] 向量删除失败（继续删除其他资源）: doc_id={doc_id}, error={str(e)}")
-                # 向量删除失败不影响其他删除操作，继续执行
+            # 2. 向量删除已转发到 RAG Service（在 api/documents.py 中处理）
+            # 这里只删除文件和数据库记录
             
             # 3. 删除物理文件
             try:

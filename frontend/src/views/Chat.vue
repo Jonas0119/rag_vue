@@ -55,6 +55,49 @@
 
       <div v-if="chatStore.isStreaming" class="message assistant">
         <div class="message-content">
+          <!-- 调试信息 -->
+          <!-- <div style="font-size: 12px; color: #999; margin-bottom: 10px;">
+            DEBUG: isStreaming={{ chatStore.isStreaming }}, activeNodes.length={{ chatStore.activeNodes.length }}
+          </div> -->
+          
+          <!-- 节点状态展示 -->
+          <div v-if="chatStore.activeNodes.length > 0" class="node-status">
+            <div 
+              v-for="(node, index) in chatStore.activeNodes" 
+              :key="node.node || index" 
+              class="node-card"
+              :class="{
+                'node-running': node.status === 'running',
+                'node-completed': node.status === 'completed',
+                'node-error': node.status === 'error'
+              }"
+            >
+              <div class="node-header">
+                <span class="node-step">{{ index + 1 }}</span>
+                <span class="node-name">{{ node.node_name }}</span>
+                <span 
+                  class="node-status-badge" 
+                  :class="{
+                    'status-running': node.status === 'running',
+                    'status-completed': node.status === 'completed',
+                    'status-error': node.status === 'error'
+                  }"
+                >
+                  {{ getStatusText(node.status) }}
+                </span>
+              </div>
+              <div class="node-description">{{ node.description }}</div>
+              <div v-if="node.progress !== undefined && node.status === 'running'" class="node-progress">
+                <div class="progress-bar" :style="{ width: node.progress + '%' }"></div>
+              </div>
+              <div v-if="node.result && node.status === 'completed'" class="node-result">
+                <span class="result-label">结果:</span>
+                <span class="result-value">{{ formatNodeResult(node.result) }}</span>
+              </div>
+            </div>
+          </div>
+          
+          <!-- 流式文本内容 -->
           <div class="message-text">
             {{ chatStore.currentMessage || '🤔 大模型正在思考中...' }}
             <span class="cursor">|</span>
@@ -81,6 +124,17 @@
           {{ chatStore.isStreaming ? '发送中...' : '发送' }}
         </button>
       </form>
+
+      <!-- 超时重试提示 -->
+      <div 
+        v-if="chatStore.hasTimeout && !chatStore.isStreaming" 
+        class="retry-hint"
+      >
+        <span>本次回答超时，可能是模型或网络较慢。</span>
+        <button class="retry-btn" @click="handleRetry" type="button">
+          重试刚才的问题
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -108,7 +162,15 @@ async function handleSendMessage() {
   const message = inputMessage.value.trim()
   inputMessage.value = ''
   
+  console.log('[Chat.vue] 发送消息:', message)
+  console.log('[Chat.vue] 发送前 isStreaming:', chatStore.isStreaming)
+  console.log('[Chat.vue] 发送前 activeNodes:', chatStore.activeNodes)
+  
   await chatStore.sendMessage(message)
+}
+
+async function handleRetry() {
+  await chatStore.retryLastQuestion()
 }
 
 // 自动滚动到底部
@@ -131,6 +193,31 @@ async function handleDeleteMessage(message: Message) {
     console.error('删除消息失败:', error)
     alert(error.message || '删除消息失败，请稍后重试')
   }
+}
+
+function getStatusText(status: string): string {
+  const statusMap: Record<string, string> = {
+    'pending': '等待中',
+    'running': '执行中',
+    'completed': '已完成',
+    'error': '错误'
+  }
+  return statusMap[status] || status
+}
+
+function formatNodeResult(result: any): string {
+  if (!result) return ''
+  if (typeof result === 'string') return result
+  if (result.action) {
+    if (result.doc_count !== undefined) {
+      return `检索到 ${result.doc_count} 个文档`
+    }
+    if (result.answer_length !== undefined) {
+      return `生成了 ${result.answer_length} 字符的答案`
+    }
+    return result.action
+  }
+  return JSON.stringify(result)
 }
 
 function scrollToBottom() {
@@ -384,6 +471,151 @@ summary:hover {
   border: 1px solid var(--color-border);
 }
 
+/* 节点状态样式 */
+.node-status {
+  margin-bottom: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.node-card {
+  padding: var(--spacing-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-base);
+  animation: nodeSlideIn 0.3s ease-out;
+}
+
+@keyframes nodeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.node-card.node-running {
+  border-left: 3px solid var(--color-primary);
+  background: rgba(66, 153, 225, 0.05);
+}
+
+.node-card.node-completed {
+  border-left: 3px solid #48bb78;
+  background: rgba(72, 187, 120, 0.05);
+}
+
+.node-card.node-error {
+  border-left: 3px solid #e53e3e;
+  background: rgba(229, 62, 62, 0.05);
+}
+
+.node-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-xs);
+}
+
+.node-step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.node-name {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-size: 14px;
+  flex: 1;
+}
+
+.node-status-badge {
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.node-status-badge.status-running {
+  background: rgba(66, 153, 225, 0.2);
+  color: var(--color-primary);
+}
+
+.node-status-badge.status-completed {
+  background: rgba(72, 187, 120, 0.2);
+  color: #48bb78;
+}
+
+.node-status-badge.status-error {
+  background: rgba(229, 62, 62, 0.2);
+  color: #e53e3e;
+}
+
+.node-description {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-xs);
+  line-height: 1.5;
+}
+
+.node-progress {
+  margin-top: var(--spacing-xs);
+  height: 4px;
+  background: var(--color-bg-primary);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: var(--radius-sm);
+  transition: width 0.3s ease;
+  animation: progressPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes progressPulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.node-result {
+  margin-top: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--color-bg-primary);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.result-label {
+  font-weight: 500;
+  color: var(--color-text-primary);
+  margin-right: var(--spacing-xs);
+}
+
+.result-value {
+  color: var(--color-text-secondary);
+}
+
 .chat-input-container {
   padding: var(--spacing-xl);
   border-top: 1px solid var(--color-border);
@@ -425,6 +657,31 @@ summary:hover {
   background: var(--color-bg-secondary);
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+.retry-hint {
+  margin-top: var(--spacing-md);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.retry-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: var(--color-primary);
+  color: #fff;
+  cursor: pointer;
+  transition: background var(--transition-base), transform var(--transition-base);
+}
+
+.retry-btn:hover {
+  background: var(--color-primary-hover);
+  transform: translateY(-1px);
 }
 
 .send-btn {

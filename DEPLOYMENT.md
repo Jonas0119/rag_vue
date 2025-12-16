@@ -1,69 +1,51 @@
-# 部署指南
+## 部署指南（前端 + Backend 网关 + 本地 RAG 服务）
 
-本文档详细说明如何将 RAG 智能问答系统部署到 Vercel。
+本文档说明如何在新架构下部署整个系统：
 
-## 📋 部署前准备
+- 前端（Vue）部署到 Vercel；
+- Backend 作为 Vercel 轻量 API 网关；
+- `rag_service` 作为本地/服务器 RAG 服务，通过 ngrok 或反向代理暴露。
+
+---
+
+## 一、部署前准备
 
 ### 1. 云服务配置
 
-确保以下云服务已正确配置：
+确保以下云服务已正确配置（与原方案一致）：
 
-- ✅ **Supabase Storage**：文件存储服务（STORAGE_MODE=cloud 时）
-- ✅ **Supabase PostgreSQL**：数据库服务（DATABASE_MODE=cloud 时）
-- ✅ **Pinecone**：向量库服务（VECTOR_DB_MODE=cloud 时）
-- ✅ **LLM API**：MiniMax / OpenAI / Anthropic 等
+- ✅ **Supabase Storage**：文件存储服务
+- ✅ **Supabase PostgreSQL**：数据库服务
+- ✅ **Pinecone**：向量库服务（如使用云向量库）
+- ✅ **LLM API**：MiniMax / Anthropic 等
 
-### 2. 环境变量准备
+### 2. RAG 服务配置
 
-所有配置通过 Vercel 环境变量管理，参考 `config_template.txt`
+RAG 相关逻辑从 `inference_service` 合并到了 `rag_service`：
 
-### 3. 本地推理服务（ngrok）准备
+- Embedding 与 Rerank 模型由 `rag_service` 直接加载（从 ModelScope/HuggingFace 下载）。
+- `inference_service/` 目录不再使用，可作为参考或后续删除。
 
-当前项目 **不在 Vercel 中加载/下载 Embedding 与 Rerank 模型**，而是通过本地 FastAPI 服务 + ngrok 暴露出来的云推理接口：
-
-- 本地目录：`inference_service/`
-- 接口：
-  - `GET /health`
-  - `POST /embed`
-  - `POST /rerank`
-- 默认端口：`8001`
-- 通过 `ngrok http 8001` 暴露为公网 HTTPS 地址（例如：`https://xxx.ngrok-free.dev`）
-
-部署到 Vercel 前，请先在本地完成以下操作：
-
-1. 在项目根目录安装依赖并启动推理服务：
+请先完成 `rag_service/DEPLOYMENT.md` 中的步骤，在本地或服务器上启动：
 
    ```bash
-   poetry install
-   poetry run uvicorn inference_service.main:app --host 0.0.0.0 --port 8001
-   ```
-
-2. 启动 ngrok 暴露本地端口：
-
-   ```bash
+cd rag_service
+pip install .
+uvicorn rag_service.main:app --host 0.0.0.0 --port 8001
    ngrok http 8001
-   # 记下返回的 HTTPS 公网 URL，例如：
-   # https://nonanesthetized-nolan-riantly.ngrok-free.dev
-   ```
+# 得到 https://your-rag-service.ngrok-free.app
+```
 
-3. 在 Vercel 后端项目中，将该 URL 配置到环境变量 `INFERENCE_API_BASE_URL` 中，并确保：
+记下 ngrok 暴露的 HTTPS 公网地址，用于 backend 的 `RAG_SERVICE_URL`。
 
-   ```env
-   USE_REMOTE_EMBEDDINGS=true
-   USE_REMOTE_RERANKER=true   # 若需要远程 rerank
-   INFERENCE_API_BASE_URL=https://your-ngrok-url.ngrok-free.dev
-   INFERENCE_API_KEY=与你在 inference_service 中配置的 INFERENCE_API_KEY 保持一致
-   MODEL_DOWNLOAD_SOURCE=modelscope
-   ```
+---
 
-> 注意：Vercel 每次调用后端时，都会通过 `INFERENCE_API_BASE_URL` 访问你本地的推理服务，因此在使用期间需要保持本地 `inference_service` 与 `ngrok` 长期运行。
+## 二、部署步骤
 
-## 🚀 部署步骤
+### 步骤 1: 准备代码与环境
 
-### 步骤 1: 准备代码
-
-1. 确保所有代码已提交到 Git 仓库
-2. 确认 `.gitignore` 排除了敏感文件（`backend/.env`）
+1. 确保所有代码已提交到 Git 仓库。
+2. 确认 `.gitignore` 排除了敏感文件（如 `backend/.env`、`rag_service/.env`）。
 
 ### 步骤 2: 部署前端
 
@@ -79,82 +61,54 @@
 6. 添加环境变量：
    - `VITE_API_BASE_URL`: 后端 API 地址（部署后端后获取）
 
-### 步骤 3: 部署后端
+### 步骤 3: 部署 Backend（Vercel 轻量网关）
 
 1. 在 Vercel 中创建新项目
 2. 选择同一个仓库
 3. 配置项目：
    - **Root Directory**: `backend`
    - **Framework Preset**: `Other`
-   - **Build Command**: `poetry install`（或 `pip install -r requirements.txt`）
+   - **Build Command**: `pip install .`
    - **Output Directory**: `.`（不需要）
-4. 添加所有必要的环境变量（参考下面的环境变量列表）
+4. 添加所有必要的环境变量（参考下文“环境变量一览”）
 5. Vercel 会自动识别 `backend/vercel.json` 配置
 
-### 步骤 4: 配置环境变量
+### 步骤 4: 配置 Backend 环境变量
 
-在 Vercel 项目设置中，添加以下环境变量：
-
-#### 基础配置（必须）
+在 Vercel 后端项目中，配置（示例）：
 
 ```env
-ANTHROPIC_API_KEY=sk-xxx
-ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
-```
-
-#### 模式配置（必须全部为 cloud）
-
-```env
-STORAGE_MODE=cloud
-VECTOR_DB_MODE=cloud
-DATABASE_MODE=cloud
-```
-
-此时：
-
-- **文件存储** 走 Supabase Storage
-- **数据库** 走 Supabase PostgreSQL
-- **向量库** 走 Pinecone（远程云向量库）
-- **Embedding / Rerank** 走本地 `inference_service` + ngrok 暴露的 HTTP 接口（通过上文的 `INFERENCE_API_BASE_URL` 等变量控制）
-
-#### Supabase 配置（STORAGE_MODE=cloud 时必需）
-
-```env
+# Supabase / 数据库（cloud 模式）
 SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_KEY=your_publishable_key
 SUPABASE_SERVICE_KEY=your_service_key
 SUPABASE_STORAGE_BUCKET=rag
-```
-
-#### PostgreSQL 配置（DATABASE_MODE=cloud 时必需）
-
-```env
 DATABASE_URL=postgresql://postgres:password@db.xxx.supabase.co:5432/postgres
-```
 
-#### Pinecone 配置（VECTOR_DB_MODE=cloud 时必需）
-
-```env
-PINECONE_API_KEY=xxx-xxx-xxx
-PINECONE_ENVIRONMENT=us-east-1
-PINECONE_INDEX_NAME=rag-system
-```
-
-#### 认证配置（必须）
-
-```env
-JWT_SECRET_KEY=your_random_secret_key  # 使用: python -c "import secrets; print(secrets.token_urlsafe(32))"
+# 认证
+JWT_SECRET_KEY=your_random_secret_key
 JWT_EXPIRY_DAYS=30
 JWT_ALGORITHM=HS256
-```
 
-#### CORS 配置（必须）
-
-```env
+# CORS
 CORS_ORIGINS=https://your-frontend-domain.vercel.app
+
+# RAG 服务地址（指向 rag_service，经 ngrok 暴露）
+RAG_SERVICE_URL=https://your-rag-service.ngrok-free.app
 ```
 
-### 步骤 5: 首次部署
+Backend 不再需要 `INFERENCE_API_BASE_URL`、`USE_REMOTE_EMBEDDINGS`、`USE_REMOTE_RERANKER` 等变量。
+
+### 步骤 5: 配置 rag_service 环境变量
+
+在运行 `rag_service` 的机器上，按照 `rag_service/DEPLOYMENT.md` 配置：
+
+- LLM 相关：`ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `LLM_MODEL` 等；
+- 模型加载：`EMBEDDING_MODEL`, `RERANKER_MODEL`, `MODEL_DOWNLOAD_SOURCE`；
+- 向量库：`VECTOR_DB_MODE`, `PINECONE_*`；
+- 存储与数据库：`SUPABASE_*`, `DATABASE_URL` 等。
+
+### 步骤 6: 首次部署
 
 1. 点击 "Deploy" 或等待自动部署
 2. 查看构建日志，确认没有错误
@@ -163,7 +117,7 @@ CORS_ORIGINS=https://your-frontend-domain.vercel.app
    - 云服务连接是否正常
    - 数据库是否已初始化
 
-### 步骤 6: 验证部署
+### 步骤 7: 验证部署
 
 部署成功后，测试以下功能：
 

@@ -7,13 +7,12 @@ from pathlib import Path
 import threading
 import logging
 
-from backend.utils.config import config
-from backend.utils.model_downloader import get_model_path
-from .remote_embeddings import RemoteEmbeddings
+from rag_service.utils.config import config
+from rag_service.utils.model_downloader import get_model_path
+from rag_service.utils.performance_monitor import monitor_vector_db
 
 from langchain_core.documents import Document
-from backend.utils.performance_monitor import monitor_vector_db
-from .vector_strategies import VectorStoreStrategy, ChromaStrategy, PineconeStrategy
+from rag_service.services.vector_strategies import VectorStoreStrategy, ChromaStrategy, PineconeStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +27,8 @@ class VectorStoreService:
         self._embeddings_loading = False
         self._embeddings_loaded = False
         self._embeddings_lock = threading.Lock()
-        self._use_remote = config.USE_REMOTE_EMBEDDINGS and bool(
-            config.INFERENCE_API_BASE_URL
-        )
         
-        # 在后台线程中启动模型加载
+        # 在后台线程中启动模型加载（直接使用本地模型，从ModelScope下载）
         self._start_loading_embeddings()
     
     def _start_loading_embeddings(self):
@@ -50,49 +46,36 @@ class VectorStoreService:
         logger.info(f"[向量库服务] 已在后台启动 Embedding 模型加载: {config.EMBEDDING_MODEL}")
     
     def _load_embeddings_async(self):
-        """异步加载 Embedding 模型（在后台线程中执行）"""
+        """异步加载 Embedding 模型（在后台线程中执行，从ModelScope下载）"""
         try:
-            if self._use_remote:
-                logger.info(
-                    "[向量库服务] 使用远程 Embeddings 服务: %s",
-                    config.INFERENCE_API_BASE_URL,
-                )
-                embeddings = RemoteEmbeddings(
-                    base_url=config.INFERENCE_API_BASE_URL,
-                    api_key=config.INFERENCE_API_KEY,
-                    timeout=config.INFERENCE_API_TIMEOUT,
-                    max_retry=config.INFERENCE_API_MAX_RETRY,
-                )
+            # 直接使用本地 Embedding 模型（从ModelScope下载）
+            from langchain_huggingface import HuggingFaceEmbeddings  # type: ignore[import]
+
+            logger.info(
+                f"[向量库服务] 开始加载本地 Embedding 模型: {config.EMBEDDING_MODEL} (source={config.MODEL_DOWNLOAD_SOURCE})"
+            )
+            # 解决 HuggingFace tokenizers 的 fork 警告
+            os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+            # 根据下载源获取模型路径（优先使用ModelScope）
+            # 如果使用 ModelScope，会先下载到本地默认缓存目录，然后返回本地路径
+            # 如果使用 HuggingFace，直接返回模型名称
+            model_path = get_model_path(
+                config.EMBEDDING_MODEL,
+                config.MODEL_DOWNLOAD_SOURCE
+            )
+
+            if config.MODEL_DOWNLOAD_SOURCE == "modelscope":
+                logger.info(f"[向量库服务] 使用 ModelScope 下载的本地模型: {model_path}")
             else:
-                # 本地 Embedding 模型路径（仅在未启用远程模式时使用）
-                # 注意：在 Vercel 部署中通常不会走到这里，因为推荐使用远程 Embeddings。
-                from langchain_huggingface import HuggingFaceEmbeddings  # type: ignore[import]
+                logger.info(f"[向量库服务] 使用 HuggingFace 模型: {model_path}")
 
-                logger.info(
-                    f"[向量库服务] 开始加载本地 Embedding 模型: {config.EMBEDDING_MODEL}"
-                )
-                # 解决 HuggingFace tokenizers 的 fork 警告
-                os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-                # 根据下载源获取模型路径
-                # 如果使用 ModelScope，会先下载到本地默认缓存目录，然后返回本地路径
-                # 如果使用 HuggingFace，直接返回模型名称
-                model_path = get_model_path(
-                    config.EMBEDDING_MODEL,
-                    config.MODEL_DOWNLOAD_SOURCE
-                )
-
-                if config.MODEL_DOWNLOAD_SOURCE == "modelscope":
-                    logger.info(f"[向量库服务] 使用 ModelScope 下载的本地模型: {model_path}")
-                else:
-                    logger.info(f"[向量库服务] 使用 HuggingFace 模型: {model_path}")
-
-                # 使用模型路径加载（支持本地路径和 HuggingFace 模型名称）
-                embeddings = HuggingFaceEmbeddings(
-                    model_name=model_path,
-                    model_kwargs={'device': config.EMBEDDING_DEVICE},
-                    encode_kwargs={'normalize_embeddings': config.NORMALIZE_EMBEDDINGS}
-                )
+            # 使用模型路径加载（支持本地路径和 HuggingFace 模型名称）
+            embeddings = HuggingFaceEmbeddings(
+                model_name=model_path,
+                model_kwargs={'device': config.EMBEDDING_DEVICE},
+                encode_kwargs={'normalize_embeddings': config.NORMALIZE_EMBEDDINGS}
+            )
             
             with self._embeddings_lock:
                 self.embeddings = embeddings
@@ -217,7 +200,7 @@ class VectorStoreService:
                     return self.strategy.get_document_count(user_id)
                 else:
                     # 如果模型未加载，尝试直接从数据库获取（作为 fallback）
-                    from backend.database import DocumentDAO
+                    from rag_service.database import DocumentDAO
                     doc_dao = DocumentDAO()
                     return doc_dao.get_total_chunk_count(user_id, status='active')
             except Exception:

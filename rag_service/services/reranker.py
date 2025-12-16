@@ -9,8 +9,8 @@ from typing import List, Optional, Dict
 import requests
 from langchain_core.documents import Document
 
-from backend.utils.config import config
-from backend.utils.model_downloader import get_model_path
+from rag_service.utils.config import config
+from rag_service.utils.model_downloader import get_model_path
 
 logger = logging.getLogger(__name__)
 

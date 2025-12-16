@@ -7,7 +7,7 @@ import logging
 import os
 from typing import Optional
 
-from backend.utils.config import config
+from rag_service.utils.config import config
 
 logger = logging.getLogger(__name__)
 

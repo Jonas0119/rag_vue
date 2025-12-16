@@ -10,7 +10,7 @@ from langchain.tools import tool
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.documents import Document
 
-from .reranker import CrossEncoderReranker
+from rag_service.services.reranker import CrossEncoderReranker
 
 logger = logging.getLogger(__name__)
 

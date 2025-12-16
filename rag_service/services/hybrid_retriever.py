@@ -10,8 +10,8 @@ from collections import defaultdict
 from langchain_core.documents import Document
 from langchain_community.retrievers import BM25Retriever
 
-from .vector_store_service import get_vector_store_service
-from .vector_strategies import ChromaStrategy
+from rag_service.services.vector_store_service import get_vector_store_service
+from rag_service.services.vector_strategies import ChromaStrategy
 
 logger = logging.getLogger(__name__)
 

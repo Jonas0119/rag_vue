@@ -1,80 +1,39 @@
 /**
  * 聊天 API 客户端
  */
-import type { Session, Message, ChatMessageRequest, SSEChunk } from '@/types/chat'
+import type { Session, Message, ChatMessageRequest } from '@/types/chat'
 
 export const chatApi = {
   /**
-   * 发送消息（使用 POST + SSE）
-   * 返回一个可关闭的控制器对象
+   * 发送消息（普通 POST 请求）
+   * 返回后端的简单确认结果
    */
-  sendMessage(
-    request: ChatMessageRequest,
-    onMessage: (chunk: SSEChunk) => void,
-    onError?: (error: Error) => void
-  ): { close: () => void } {
+  async sendMessage(
+    request: ChatMessageRequest
+  ): Promise<{ success: boolean; session_id: string }> {
     const token = localStorage.getItem('token')
     if (!token) {
       throw new Error('未登录')
     }
 
-    const controller = new AbortController()
-    
-    fetch('/api/chat/message', {
+    const response = await fetch('/api/chat/message', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'text/event-stream'
+        'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify(request),
-      signal: controller.signal
+      body: JSON.stringify(request)
     })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`)
-        }
 
-        const reader = response.body?.getReader()
-        const decoder = new TextDecoder()
+    if (!response.ok) {
+      const text = await response.text()
+      throw new Error(text || `HTTP error! status: ${response.status}`)
+    }
 
-        if (!reader) {
-          throw new Error('无法读取响应流')
-        }
-
-        let buffer = ''
-
-        while (true) {
-          const { done, value } = await reader.read()
-          
-          if (done) {
-            break
-          }
-
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n\n')
-          buffer = lines.pop() || ''
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6)) as SSEChunk
-                onMessage(data)
-              } catch (e) {
-                console.error('解析 SSE 数据失败:', e)
-              }
-            }
-          }
-        }
-      })
-      .catch((error) => {
-        if (error.name !== 'AbortError' && onError) {
-          onError(error)
-        }
-      })
-
+    const data = await response.json()
     return {
-      close: () => controller.abort()
+      success: !!data.success,
+      session_id: data.session_id as string
     }
   },
 
