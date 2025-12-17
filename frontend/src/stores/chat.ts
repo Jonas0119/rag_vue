@@ -265,12 +265,12 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /**
-   * 轮询获取回答：10s -> 5s -> 3s -> 每 2s，最长 60s
+   * 轮询获取回答：10s -> 5s -> 3s -> 每 2s，最长 120s
    */
   async function startPollingForAnswer(sessionId: string): Promise<void> {
     const delays = [10000, 5000, 3000]
     const steadyDelay = 2000
-    const maxDuration = 60000
+    const maxDuration = 120000
     const startTime = Date.now()
     let delayIndex = 0
 

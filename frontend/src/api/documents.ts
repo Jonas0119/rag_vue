@@ -24,10 +24,12 @@ export const documentsApi = {
       '/documents/upload',
       formData,
       {
+        // 不要手动设置 Content-Type，让浏览器自动设置（包括 boundary）
+        // 手动设置会覆盖掉 boundary，导致后端无法解析 multipart/form-data
         headers: {
-          'Content-Type': 'multipart/form-data'
+          // 移除 Content-Type，让浏览器自动设置
         },
-        timeout: 60000 // 增加到 60 秒，因为需要保存文件和创建记录
+        timeout: 120000 // 增加到 120 秒，支持大文件上传和移动端较慢的网络
       }
     )
     return response.data

@@ -55,6 +55,13 @@ request.interceptors.request.use(
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`
     }
+    
+    // 如果是 FormData，移除默认的 Content-Type，让浏览器自动设置（包括 boundary）
+    // 这对于文件上传非常重要，手动设置会破坏 multipart/form-data 的格式
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type']
+    }
+    
     return config
   },
   (error) => {
