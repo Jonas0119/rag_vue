@@ -149,11 +149,76 @@ const inputMessage = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
 
 function formatMessage(content: string): string {
-  // 简单的 Markdown 转 HTML（可以后续使用 marked 库）
-  return content
-    .replace(/\n/g, '<br>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+  // Markdown 转 HTML（支持标题、粗体、斜体、代码块等）
+  if (!content) return ''
+  
+  let html = content
+  
+  // 先保护代码块（避免代码块内的 Markdown 被解析）
+  const codeBlocks: string[] = []
+  html = html.replace(/```([\s\S]*?)```/g, (match, code) => {
+    const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`
+    codeBlocks.push(`<pre><code>${code.trim()}</code></pre>`)
+    return placeholder
+  })
+  
+  // 保护行内代码
+  const inlineCodes: string[] = []
+  html = html.replace(/`([^`\n]+)`/g, (match, code) => {
+    const placeholder = `__INLINE_CODE_${inlineCodes.length}__`
+    inlineCodes.push(`<code>${code}</code>`)
+    return placeholder
+  })
+  
+  // 按行处理（标题必须在换行处理之前）
+  const lines = html.split('\n')
+  const processedLines: string[] = []
+  
+  for (const line of lines) {
+    const trimmed = line.trim()
+    
+    // 处理标题（按从多到少的 # 匹配，避免误匹配）
+    if (trimmed.startsWith('#### ')) {
+      processedLines.push(`<h4>${trimmed.substring(5)}</h4>`)
+    } else if (trimmed.startsWith('### ')) {
+      processedLines.push(`<h3>${trimmed.substring(4)}</h3>`)
+    } else if (trimmed.startsWith('## ')) {
+      processedLines.push(`<h2>${trimmed.substring(3)}</h2>`)
+    } else if (trimmed.startsWith('# ')) {
+      processedLines.push(`<h1>${trimmed.substring(2)}</h1>`)
+    } else {
+      processedLines.push(line)
+    }
+  }
+  
+  html = processedLines.join('\n')
+  
+  // 处理粗体（**文本**）
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+  
+  // 处理斜体（*文本*，但要避免匹配列表标记）
+  html = html.replace(/(?<![*\-\d])\*([^*\n]+?)\*(?![*\-\d])/g, '<em>$1</em>')
+  
+  // 恢复行内代码
+  inlineCodes.forEach((code, index) => {
+    html = html.replace(`__INLINE_CODE_${index}__`, code)
+  })
+  
+  // 恢复代码块
+  codeBlocks.forEach((block, index) => {
+    html = html.replace(`__CODE_BLOCK_${index}__`, block)
+  })
+  
+  // 处理换行
+  html = html.replace(/\n\n+/g, '</p><p>')
+  html = html.replace(/\n/g, '<br>')
+  
+  // 包装段落（如果内容还没有被其他块级元素包装）
+  if (!html.match(/^<(h[1-6]|pre|p)/)) {
+    html = `<p>${html}</p>`
+  }
+  
+  return html
 }
 
 async function handleSendMessage() {
@@ -355,6 +420,67 @@ watch(() => chatStore.messages.length, () => {
 
 .message.user .message-text {
   color: white;
+}
+
+/* Markdown 样式 */
+.message-text :deep(h1),
+.message-text :deep(h2),
+.message-text :deep(h3),
+.message-text :deep(h4) {
+  margin: 1em 0 0.5em 0;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.message-text :deep(h1) {
+  font-size: 1.5em;
+  border-bottom: 2px solid var(--color-border);
+  padding-bottom: 0.3em;
+}
+
+.message-text :deep(h2) {
+  font-size: 1.3em;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0.2em;
+}
+
+.message-text :deep(h3) {
+  font-size: 1.1em;
+  margin-top: 1.2em;
+}
+
+.message-text :deep(h4) {
+  font-size: 1em;
+  margin-top: 1em;
+}
+
+.message-text :deep(code) {
+  background: var(--color-bg-tertiary);
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+}
+
+.message-text :deep(pre) {
+  background: var(--color-bg-tertiary);
+  padding: 1em;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.message-text :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+
+.message-text :deep(strong) {
+  font-weight: 600;
+}
+
+.message-text :deep(em) {
+  font-style: italic;
 }
 
 .cursor {

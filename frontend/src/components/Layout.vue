@@ -65,7 +65,7 @@
       <div v-if="$route.path === '/'" class="session-list">
         <div class="session-list-header">
           <h3>会话列表</h3>
-          <button @click="chatStore.newChat()" class="new-chat-btn">+ 新建</button>
+          <button @click="handleNewChat" class="new-chat-btn">+ 新建</button>
         </div>
         <div class="sessions">
           <div
@@ -126,6 +126,12 @@ function closeMenuOnMobile() {
 function handleSessionClick(sessionId: string) {
   chatStore.selectSession(sessionId)
   // 在移动端点击会话项时关闭菜单
+  closeMenuOnMobile()
+}
+
+function handleNewChat() {
+  chatStore.newChat()
+  // 在移动端点击新建会话时关闭菜单
   closeMenuOnMobile()
 }
 
