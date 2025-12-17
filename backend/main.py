@@ -16,52 +16,75 @@ current_dir = current_file.parent
 # 检查是否在 Vercel 环境（/var/task/）
 if str(current_dir) == "/var/task":
     # Vercel 环境：backend/ 目录的内容被直接复制到 /var/task/
-    # 创建一个导入钩子，将 backend.xxx 重定向到当前目录的 xxx
+    # 手动创建 backend 模块结构，使其指向当前目录
     import importlib
     import importlib.abc
     import importlib.machinery
     import types
     
-    class BackendImportFinder(importlib.abc.MetaPathFinder):
-        """将 backend.xxx 导入重定向到当前目录的 xxx"""
-        def find_spec(self, name, path, target=None):
-            if name.startswith('backend.'):
-                # 将 backend.xxx 转换为当前目录下的 xxx
-                submodule_name = name[8:]  # 去掉 'backend.' 前缀
-                parts = submodule_name.split('.')
-                module_path = current_dir
-                
-                # 构建模块路径
-                for part in parts:
-                    module_path = module_path / part
-                
-                # 检查是否是文件或目录
-                if module_path.is_file() and module_path.suffix == '.py':
-                    # Python 文件
-                    loader = importlib.machinery.SourceFileLoader(name, str(module_path))
-                    return importlib.machinery.ModuleSpec(name, loader)
-                elif module_path.is_dir():
-                    # 目录（包）
-                    init_file = module_path / '__init__.py'
-                    loader = importlib.machinery.SourceFileLoader(name, str(init_file)) if init_file.exists() else None
-                    spec = importlib.machinery.ModuleSpec(name, loader)
-                    spec.submodule_search_locations = [str(module_path)]
-                    return spec
-                elif (module_path.parent.is_dir() and 
-                      (module_path.parent / '__init__.py').exists()):
-                    # 可能是包内的模块文件
-                    py_file = module_path.with_suffix('.py')
-                    if py_file.exists():
-                        loader = importlib.machinery.SourceFileLoader(name, str(py_file))
-                        return importlib.machinery.ModuleSpec(name, loader)
-            return None
-    
-    # 注册导入钩子
-    sys.meta_path.insert(0, BackendImportFinder())
+    # 创建 backend 模块
+    backend_module = types.ModuleType('backend')
+    backend_module.__path__ = [str(current_dir)]
+    backend_module.__file__ = str(current_dir / '__init__.py')
+    sys.modules['backend'] = backend_module
     
     # 将当前目录添加到路径
     if str(current_dir) not in sys.path:
         sys.path.insert(0, str(current_dir))
+    
+    # 使用导入钩子处理 backend.xxx 导入
+    class BackendImportFinder(importlib.abc.MetaPathFinder):
+        """将 backend.xxx 导入重定向到当前目录的 xxx"""
+        def find_spec(self, name, path, target=None):
+            # 处理 backend 模块本身
+            if name == 'backend':
+                spec = importlib.machinery.ModuleSpec('backend', None)
+                spec.submodule_search_locations = [str(current_dir)]
+                return spec
+            
+            # 处理 backend.xxx 子模块
+            if name.startswith('backend.'):
+                submodule_name = name[8:]  # 去掉 'backend.' 前缀
+                parts = submodule_name.split('.')
+                module_path = current_dir
+                
+                # 构建完整路径
+                for part in parts:
+                    module_path = module_path / part
+                
+                # 首先尝试作为 Python 文件 (例如: core/config.py)
+                py_file = module_path.with_suffix('.py')
+                if py_file.exists() and py_file.is_file():
+                    loader = importlib.machinery.SourceFileLoader(name, str(py_file))
+                    spec = importlib.machinery.ModuleSpec(name, loader)
+                    spec.origin = str(py_file)
+                    return spec
+                
+                # 然后尝试作为包目录 (例如: core/)
+                if module_path.is_dir():
+                    init_file = module_path / '__init__.py'
+                    loader = None
+                    if init_file.exists():
+                        loader = importlib.machinery.SourceFileLoader(name, str(init_file))
+                    spec = importlib.machinery.ModuleSpec(name, loader)
+                    spec.submodule_search_locations = [str(module_path)]
+                    if loader:
+                        spec.origin = str(init_file)
+                    return spec
+                
+                # 最后尝试在父包中查找模块 (例如: core/config 在 core/ 包中)
+                parent = module_path.parent
+                if parent.is_dir():
+                    py_file = module_path.with_suffix('.py')
+                    if py_file.exists() and py_file.is_file():
+                        loader = importlib.machinery.SourceFileLoader(name, str(py_file))
+                        spec = importlib.machinery.ModuleSpec(name, loader)
+                        spec.origin = str(py_file)
+                        return spec
+            return None
+    
+    # 注册导入钩子（必须在所有导入之前）
+    sys.meta_path.insert(0, BackendImportFinder())
     
     project_root = current_dir
 else:
