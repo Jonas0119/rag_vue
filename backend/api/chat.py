@@ -7,7 +7,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import httpx
+# 延迟导入 httpx，避免在模块加载时进行不必要的初始化
+# import httpx
 
 from backend.core.dependencies import get_current_user_dependency
 from backend.database.models import User
@@ -83,6 +84,9 @@ async def send_message(
     )
 
     # 转发请求到 RAG Service（普通 POST）
+    # 延迟导入 httpx，避免在不需要时进行初始化
+    import httpx
+    
     rag_service_url = config.RAG_SERVICE_URL.rstrip("/")
     target_url = f"{rag_service_url}/api/chat/message"
 

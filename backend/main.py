@@ -21,6 +21,24 @@ if str(current_dir) == "/var/task":
     import importlib.abc
     import importlib.machinery
     import types
+    import os
+    
+    # 调试：检查文件是否存在
+    debug_files = [
+        'core/config.py',
+        'api/auth.py',
+        'database/db_manager.py'
+    ]
+    missing_files = []
+    for file_path in debug_files:
+        full_path = current_dir / file_path
+        if not full_path.exists():
+            missing_files.append(str(full_path))
+    
+    # 如果关键文件缺失，记录错误（但继续尝试）
+    if missing_files:
+        print(f"⚠️ 警告：以下文件不存在: {missing_files}", file=sys.stderr)
+        print(f"📁 当前目录内容: {list(os.listdir(current_dir))[:10]}", file=sys.stderr)
     
     # 创建 backend 模块
     backend_module = types.ModuleType('backend')

@@ -6,6 +6,19 @@
       "use": "@vercel/python"
     }
   ],
+  "functions": {
+    "main.py": {
+      "includeFiles": [
+        "api/**",
+        "core/**",
+        "database/**",
+        "services/**",
+        "utils/**",
+        "**/*.py",
+        "pyproject.toml"
+      ]
+    }
+  },
   "routes": [
     {
       "src": "/(.*)",
