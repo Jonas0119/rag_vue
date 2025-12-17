@@ -16,5 +16,6 @@
     "index.py": {
       "includeFiles": "**"
     }
-  }
+  },
+  "outputDirectory": "."
 }
