@@ -1,0 +1,24 @@
+# Web & framework
+fastapi>=0.115.0,<1.0.0
+uvicorn[standard]>=0.32.0,<1.0.0
+mangum>=0.18.0,<1.0.0
+
+# Config & validation
+pydantic[email]>=2.9.0,<3.0.0
+pydantic-settings>=2.5.0,<3.0.0
+python-multipart>=0.0.20,<0.1.0
+python-dotenv>=1.2.1,<2.0.0
+email-validator>=2.1.0
+
+# Auth & security
+bcrypt>=5.0.0,<6.0.0
+pyjwt>=2.10.1,<3.0.0
+
+# Storage & database
+supabase>=2.0.0,<3.0.0
+tuspy>=0.2.4,<1.0.0
+psycopg2-binary>=2.9.9,<3.0.0
+pypdf>=6.2.0,<7.0.0
+
+# HTTP client for proxying to RAG service
+httpx>=0.24.0,<1.0.0
