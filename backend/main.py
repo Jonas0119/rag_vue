@@ -51,73 +51,78 @@ if str(current_dir) == "/var/task":
         sys.path.insert(0, str(current_dir))
     
     # 使用导入钩子处理 backend.xxx 导入
-    class BackendFileLoader(importlib.machinery.SourceFileLoader):
-        """自定义 Loader，确保 __file__ 被正确设置"""
-        def create_module(self, spec):
-            """创建模块时设置 __file__"""
-            module = super().create_module(spec)
-            if module is not None:
-                module.__file__ = self.path
-            return module
-        
-        def exec_module(self, module):
-            """执行模块前确保 __file__ 被设置"""
-            if not hasattr(module, '__file__') or module.__file__ is None:
-                module.__file__ = self.path
-            super().exec_module(module)
-    
-    class BackendImportFinder(importlib.abc.MetaPathFinder):
-        """将 backend.xxx 导入重定向到当前目录的 xxx"""
-        def find_spec(self, name, path, target=None):
-            # 处理 backend 模块本身
-            if name == 'backend':
-                spec = importlib.machinery.ModuleSpec('backend', None)
-                spec.submodule_search_locations = [str(current_dir)]
-                return spec
+    # 将类定义放在函数内部，避免 Vercel 检测时误认为它们是 HTTP 处理器
+    def _setup_backend_imports():
+        """设置 backend 模块导入钩子"""
+        class BackendFileLoader(importlib.machinery.SourceFileLoader):
+            """自定义 Loader，确保 __file__ 被正确设置"""
+            def create_module(self, spec):
+                """创建模块时设置 __file__"""
+                module = super().create_module(spec)
+                if module is not None:
+                    module.__file__ = self.path
+                return module
             
-            # 处理 backend.xxx 子模块
-            if name.startswith('backend.'):
-                submodule_name = name[8:]  # 去掉 'backend.' 前缀
-                parts = submodule_name.split('.')
-                module_path = current_dir
-                
-                # 构建完整路径
-                for part in parts:
-                    module_path = module_path / part
-                
-                # 首先尝试作为 Python 文件 (例如: core/config.py)
-                py_file = module_path.with_suffix('.py')
-                if py_file.exists() and py_file.is_file():
-                    loader = BackendFileLoader(name, str(py_file))
-                    spec = importlib.machinery.ModuleSpec(name, loader)
-                    spec.origin = str(py_file)
+            def exec_module(self, module):
+                """执行模块前确保 __file__ 被设置"""
+                if not hasattr(module, '__file__') or module.__file__ is None:
+                    module.__file__ = self.path
+                super().exec_module(module)
+        
+        class BackendImportFinder(importlib.abc.MetaPathFinder):
+            """将 backend.xxx 导入重定向到当前目录的 xxx"""
+            def find_spec(self, name, path, target=None):
+                # 处理 backend 模块本身
+                if name == 'backend':
+                    spec = importlib.machinery.ModuleSpec('backend', None)
+                    spec.submodule_search_locations = [str(current_dir)]
                     return spec
                 
-                # 然后尝试作为包目录 (例如: core/)
-                if module_path.is_dir():
-                    init_file = module_path / '__init__.py'
-                    loader = None
-                    if init_file.exists():
-                        loader = BackendFileLoader(name, str(init_file))
-                    spec = importlib.machinery.ModuleSpec(name, loader)
-                    spec.submodule_search_locations = [str(module_path)]
-                    if loader:
-                        spec.origin = str(init_file)
-                    return spec
-                
-                # 最后尝试在父包中查找模块 (例如: core/config 在 core/ 包中)
-                parent = module_path.parent
-                if parent.is_dir():
+                # 处理 backend.xxx 子模块
+                if name.startswith('backend.'):
+                    submodule_name = name[8:]  # 去掉 'backend.' 前缀
+                    parts = submodule_name.split('.')
+                    module_path = current_dir
+                    
+                    # 构建完整路径
+                    for part in parts:
+                        module_path = module_path / part
+                    
+                    # 首先尝试作为 Python 文件 (例如: core/config.py)
                     py_file = module_path.with_suffix('.py')
                     if py_file.exists() and py_file.is_file():
                         loader = BackendFileLoader(name, str(py_file))
                         spec = importlib.machinery.ModuleSpec(name, loader)
                         spec.origin = str(py_file)
                         return spec
-            return None
+                    
+                    # 然后尝试作为包目录 (例如: core/)
+                    if module_path.is_dir():
+                        init_file = module_path / '__init__.py'
+                        loader = None
+                        if init_file.exists():
+                            loader = BackendFileLoader(name, str(init_file))
+                        spec = importlib.machinery.ModuleSpec(name, loader)
+                        spec.submodule_search_locations = [str(module_path)]
+                        if loader:
+                            spec.origin = str(init_file)
+                        return spec
+                    
+                    # 最后尝试在父包中查找模块 (例如: core/config 在 core/ 包中)
+                    parent = module_path.parent
+                    if parent.is_dir():
+                        py_file = module_path.with_suffix('.py')
+                        if py_file.exists() and py_file.is_file():
+                            loader = BackendFileLoader(name, str(py_file))
+                            spec = importlib.machinery.ModuleSpec(name, loader)
+                            spec.origin = str(py_file)
+                            return spec
+                return None
+        
+        # 注册导入钩子（必须在所有导入之前）
+        sys.meta_path.insert(0, BackendImportFinder())
     
-    # 注册导入钩子（必须在所有导入之前）
-    sys.meta_path.insert(0, BackendImportFinder())
+    _setup_backend_imports()
     
     project_root = current_dir
 else:
@@ -213,12 +218,10 @@ app.include_router(sessions.router, prefix=settings.API_V1_PREFIX, tags=["会话
 
 
 # Vercel Serverless Functions 适配
-try:
-    from mangum import Mangum
-    handler = Mangum(app)
-except ImportError:
-    # 本地开发时不需要 mangum
-    handler = None
+# Vercel 会自动检测并处理 ASGI 应用（FastAPI），不需要 Mangum 适配器
+# 直接导出 app 即可，Vercel 会自动识别 FastAPI 应用
+# 注意：不要使用 Mangum，因为 Vercel 的 @vercel/python 构建器会自动处理 ASGI 应用
+__all__ = ['app']
 
 
 if __name__ == "__main__":
