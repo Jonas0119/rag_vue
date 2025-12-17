@@ -51,6 +51,21 @@ if str(current_dir) == "/var/task":
         sys.path.insert(0, str(current_dir))
     
     # 使用导入钩子处理 backend.xxx 导入
+    class BackendFileLoader(importlib.machinery.SourceFileLoader):
+        """自定义 Loader，确保 __file__ 被正确设置"""
+        def create_module(self, spec):
+            """创建模块时设置 __file__"""
+            module = super().create_module(spec)
+            if module is not None:
+                module.__file__ = self.path
+            return module
+        
+        def exec_module(self, module):
+            """执行模块前确保 __file__ 被设置"""
+            if not hasattr(module, '__file__') or module.__file__ is None:
+                module.__file__ = self.path
+            super().exec_module(module)
+    
     class BackendImportFinder(importlib.abc.MetaPathFinder):
         """将 backend.xxx 导入重定向到当前目录的 xxx"""
         def find_spec(self, name, path, target=None):
@@ -73,7 +88,7 @@ if str(current_dir) == "/var/task":
                 # 首先尝试作为 Python 文件 (例如: core/config.py)
                 py_file = module_path.with_suffix('.py')
                 if py_file.exists() and py_file.is_file():
-                    loader = importlib.machinery.SourceFileLoader(name, str(py_file))
+                    loader = BackendFileLoader(name, str(py_file))
                     spec = importlib.machinery.ModuleSpec(name, loader)
                     spec.origin = str(py_file)
                     return spec
@@ -83,7 +98,7 @@ if str(current_dir) == "/var/task":
                     init_file = module_path / '__init__.py'
                     loader = None
                     if init_file.exists():
-                        loader = importlib.machinery.SourceFileLoader(name, str(init_file))
+                        loader = BackendFileLoader(name, str(init_file))
                     spec = importlib.machinery.ModuleSpec(name, loader)
                     spec.submodule_search_locations = [str(module_path)]
                     if loader:
@@ -95,7 +110,7 @@ if str(current_dir) == "/var/task":
                 if parent.is_dir():
                     py_file = module_path.with_suffix('.py')
                     if py_file.exists() and py_file.is_file():
-                        loader = importlib.machinery.SourceFileLoader(name, str(py_file))
+                        loader = BackendFileLoader(name, str(py_file))
                         spec = importlib.machinery.ModuleSpec(name, loader)
                         spec.origin = str(py_file)
                         return spec

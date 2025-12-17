@@ -2,10 +2,22 @@
 FastAPI 核心配置
 """
 import os
+import sys
 from pathlib import Path
 
 # 获取 backend 目录
-BACKEND_DIR = Path(__file__).parent.parent
+# 在 Vercel 环境中，__file__ 可能未定义，使用备用方法
+try:
+    BACKEND_DIR = Path(__file__).parent.parent
+except NameError:
+    # 如果 __file__ 未定义（动态导入），尝试从 sys.path 推断
+    # 在 Vercel 上，backend 目录的内容在 /var/task/
+    if '/var/task' in str(sys.path[0]) if sys.path else '':
+        BACKEND_DIR = Path('/var/task')
+    else:
+        # 回退到当前工作目录
+        BACKEND_DIR = Path.cwd()
+
 # 获取项目根目录（用于其他路径引用）
 BASE_DIR = BACKEND_DIR.parent
 
