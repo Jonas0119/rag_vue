@@ -156,7 +156,7 @@ function formatMessage(content: string): string {
   
   // 先保护代码块（避免代码块内的 Markdown 被解析）
   const codeBlocks: string[] = []
-  html = html.replace(/```([\s\S]*?)```/g, (match, code) => {
+  html = html.replace(/```([\s\S]*?)```/g, (_match, code) => {
     const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`
     codeBlocks.push(`<pre><code>${code.trim()}</code></pre>`)
     return placeholder
@@ -164,7 +164,7 @@ function formatMessage(content: string): string {
   
   // 保护行内代码
   const inlineCodes: string[] = []
-  html = html.replace(/`([^`\n]+)`/g, (match, code) => {
+  html = html.replace(/`([^`\n]+)`/g, (_match, code) => {
     const placeholder = `__INLINE_CODE_${inlineCodes.length}__`
     inlineCodes.push(`<code>${code}</code>`)
     return placeholder
