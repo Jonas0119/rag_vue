@@ -57,3 +57,4 @@ temp/
 frontend/node_modules
 backend/venv
 backend/.env
+backend/API_DOCUMENTS_ANALYSIS.md
