@@ -209,18 +209,27 @@ async def health_check():
 
 
 # 导入并注册路由
-from backend.api import auth, chat, documents, sessions
+# 将导入放在函数中，避免模块级别的模块对象被 Vercel 误检测
+def _register_routes():
+    """注册所有路由"""
+    from backend.api import auth, chat, documents, sessions
+    
+    app.include_router(auth.router, prefix=settings.API_V1_PREFIX, tags=["认证"])
+    app.include_router(chat.router, prefix=settings.API_V1_PREFIX, tags=["对话"])
+    app.include_router(documents.router, prefix=settings.API_V1_PREFIX, tags=["文档"])
+    app.include_router(sessions.router, prefix=settings.API_V1_PREFIX, tags=["会话"])
 
-app.include_router(auth.router, prefix=settings.API_V1_PREFIX, tags=["认证"])
-app.include_router(chat.router, prefix=settings.API_V1_PREFIX, tags=["对话"])
-app.include_router(documents.router, prefix=settings.API_V1_PREFIX, tags=["文档"])
-app.include_router(sessions.router, prefix=settings.API_V1_PREFIX, tags=["会话"])
-
+_register_routes()
 
 # Vercel Serverless Functions 适配
 # Vercel 会自动检测并处理 ASGI 应用（FastAPI），不需要 Mangum 适配器
 # 直接导出 app 即可，Vercel 会自动识别 FastAPI 应用
 # 注意：不要使用 Mangum，因为 Vercel 的 @vercel/python 构建器会自动处理 ASGI 应用
+
+# 清理可能被误检测的模块级变量
+del _register_routes
+
+# 使用 __all__ 明确导出
 __all__ = ['app']
 
 
