@@ -58,3 +58,6 @@ frontend/node_modules
 backend/venv
 backend/.env
 backend/API_DOCUMENTS_ANALYSIS.md
+frontend/DEPLOYMENT.md
+DEPENDENCY_ANALYSIS.md
+ENVIRONMENT_SETUP.md

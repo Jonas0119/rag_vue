@@ -9,6 +9,104 @@ RAG 相关依赖与模型均不在 Vercel 中部署。
 
 ---
 
+## 目录
+
+- [本地开发环境搭建](#本地开发环境搭建)
+- [Vercel 部署](#vercel-部署)
+- [环境变量配置](#环境变量配置)
+- [故障排查](#故障排查)
+
+---
+
+## 本地开发环境搭建
+
+### 1. 创建独立虚拟环境
+
+**重要**: Backend 必须使用独立的虚拟环境，避免与 `rag_service` 的依赖冲突。
+
+```bash
+# 进入项目根目录
+cd /path/to/rag_vue
+
+# 创建 backend 专用虚拟环境
+python3 -m venv backend/venv
+
+# 激活虚拟环境
+# macOS/Linux:
+source backend/venv/bin/activate
+# Windows:
+# backend\venv\Scripts\activate
+```
+
+### 2. 安装依赖
+
+```bash
+# 确保在 backend 目录下
+cd backend
+
+# 升级 pip
+pip install --upgrade pip
+
+# 安装依赖
+pip install .
+```
+
+### 3. 验证依赖安装
+
+```bash
+# 检查关键依赖
+python -c "import fastapi; import httpx; import supabase; print('✅ 依赖安装成功')"
+
+# 验证没有不应该存在的依赖（如 langchain）
+python -c "import langchain_core" 2>/dev/null && echo "❌ 发现 langchain_core（不应该存在）" || echo "✅ 无 langchain 依赖"
+```
+
+### 4. 配置环境变量
+
+```bash
+# 复制配置模板
+cp config_template.txt .env
+
+# 编辑 .env 文件，至少配置以下变量：
+# - DATABASE_URL: 数据库连接字符串
+# - SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_KEY: Supabase 配置
+# - JWT_SECRET_KEY: JWT 密钥
+# - RAG_SERVICE_URL: RAG 服务地址（本地: http://localhost:8001）
+```
+
+### 5. 启动开发服务器
+
+```bash
+# 方式1: 使用 uvicorn 直接启动（推荐）
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+# 方式2: 使用 run.py
+python run.py
+
+# 方式3: 使用 Python 模块方式
+python -m uvicorn main:app --reload
+```
+
+### 6. 验证服务
+
+```bash
+# 健康检查
+curl http://localhost:8000/health
+
+# 访问 API 文档
+# 浏览器打开: http://localhost:8000/docs
+```
+
+### 7. 开发注意事项
+
+- **环境隔离**: 确保使用独立的虚拟环境，不要与 `rag_service` 共享
+- **依赖检查**: 如果遇到 `ModuleNotFoundError`，检查是否误用了 `rag_service` 的依赖
+- **RAG Service**: 本地开发时需要同时运行 `rag_service`（端口 8001）
+
+---
+
+## Vercel 部署
+
 ### 1. 部署前准备
 
 1. 已部署或可本地启动的 `rag_service`，并通过 ngrok 或其他反向代理暴露为公网 HTTPS 地址，例如：

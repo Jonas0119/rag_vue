@@ -179,8 +179,12 @@ class DocumentService:
             # 3. 分块（支持 Parent-Child 策略）
             documents: List[Document] = []
             if config.USE_PARENT_CHILD_STRATEGY:
+                # 延迟导入，避免在模块级别导入 langchain_core
+                from backend.utils.parent_child_splitter import split_to_parent_child
+                from langchain_core.documents import Document as LCDocument
+                
                 raw_docs = [
-                    Document(
+                    LCDocument(
                         page_content=full_text,
                         metadata={
                             "doc_id": doc_id,
@@ -194,8 +198,10 @@ class DocumentService:
                     parent_chunk_size=config.PARENT_CHUNK_SIZE,
                     child_chunk_size=config.CHILD_CHUNK_SIZE,
                 )
-                # parent_map 落库（按 doc_id 存储）
-                self.parent_child_dao.save_parent_map(user_id, doc_id, parent_map)
+                # parent_map 落库（按 doc_id 存储）- 延迟导入 ParentChildDAO
+                from backend.database import get_parent_child_dao
+                parent_child_dao = get_parent_child_dao()
+                parent_child_dao.save_parent_map(user_id, doc_id, parent_map)
 
                 # 子文档补充 chunk_id
                 for i, d in enumerate(child_docs):
@@ -210,24 +216,32 @@ class DocumentService:
                     )
                 documents = child_docs
             else:
-                chunks = split_by_paragraphs(full_text)
-                if not chunks:
-                    return False, "文档内容为空或无法分块"
+                # 注意：backend 中不应该处理文档分块和向量化
+                # 这段代码应该只在 rag_service 中使用
+                # 如果 USE_PARENT_CHILD_STRATEGY=false，backend 不应该处理文档
+                logger.warning("[文档处理] USE_PARENT_CHILD_STRATEGY=false，backend 不应该处理文档分块")
+                return False, "文档处理应该在 RAG Service 中进行，请确保 RAG_SERVICE_URL 已配置"
                 
-                logger.info(f"[文档处理] 文档 {doc_id} 分块完成: {len(chunks)} 个文本块")
-                
-                # 创建 Document 对象（带元数据）
-                for i, chunk in enumerate(chunks):
-                    doc = Document(
-                        page_content=chunk,
-                        metadata={
-                            "doc_id": doc_id,
-                            "chunk_id": i,
-                            "user_id": user_id,
-                            "source": filepath
-                        }
-                    )
-                    documents.append(doc)
+                # 以下代码已废弃，保留仅用于参考
+                # chunks = split_by_paragraphs(full_text)
+                # if not chunks:
+                #     return False, "文档内容为空或无法分块"
+                # 
+                # logger.info(f"[文档处理] 文档 {doc_id} 分块完成: {len(chunks)} 个文本块")
+                # 
+                # # 创建 Document 对象（带元数据）
+                # for i, chunk in enumerate(chunks):
+                #     from langchain_core.documents import Document as LCDocument
+                #     doc = LCDocument(
+                #         page_content=chunk,
+                #         metadata={
+                #             "doc_id": doc_id,
+                #             "chunk_id": i,
+                #             "user_id": user_id,
+                #             "source": filepath
+                #         }
+                #     )
+                #     documents.append(doc)
             
             # 4. 向量化并存入向量库
             total_chunks = len(documents)

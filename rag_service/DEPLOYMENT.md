@@ -4,15 +4,143 @@
 
 ---
 
+## 目录
+
+- [本地开发环境搭建](#本地开发环境搭建)
+- [服务器部署](#服务器部署)
+- [环境变量配置](#环境变量配置)
+- [通过 ngrok 暴露服务](#通过-ngrok-暴露服务)
+- [故障排查](#故障排查)
+
+---
+
+## 本地开发环境搭建
+
+### 1. 创建独立虚拟环境
+
+**重要**: RAG Service 必须使用独立的虚拟环境，避免与 `backend` 的依赖冲突。
+
+```bash
+# 进入项目根目录
+cd /path/to/rag_vue
+
+# 创建 rag_service 专用虚拟环境
+python3 -m venv rag_service/venv
+
+# 激活虚拟环境
+# macOS/Linux:
+source rag_service/venv/bin/activate
+# Windows:
+# rag_service\venv\Scripts\activate
+```
+
+### 2. 安装依赖
+
+```bash
+# 确保在 rag_service 目录下
+cd rag_service
+
+# 升级 pip
+pip install --upgrade pip
+
+# 安装依赖（首次安装可能需要较长时间）
+pip install .
+```
+
+**注意**: 首次安装可能需要 5-10 分钟，因为需要下载 LangChain、HuggingFace 等大型依赖包。
+
+### 3. 验证依赖安装
+
+```bash
+# 检查关键依赖
+python -c "import langchain; import langchain_core; import fastapi; print('✅ 依赖安装成功')"
+
+# 检查模型下载工具
+python -c "import modelscope; print('✅ ModelScope SDK 已安装')"
+```
+
+### 4. 配置环境变量
+
+```bash
+# 创建 .env 文件
+cat > .env << EOF
+# LLM / API
+ANTHROPIC_API_KEY=sk-xxx
+ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
+LLM_MODEL=MiniMax-M2
+
+# Embedding & Reranker（从 ModelScope 下载）
+EMBEDDING_MODEL=BAAI/bge-large-zh-v1.5
+EMBEDDING_DEVICE=cpu  # 或 cuda（如果有 GPU）
+NORMALIZE_EMBEDDINGS=true
+RERANKER_MODEL=BAAI/bge-reranker-base
+MODEL_DOWNLOAD_SOURCE=modelscope
+
+# 向量库
+VECTOR_DB_MODE=cloud  # cloud: Pinecone, local: Chroma
+PINECONE_API_KEY=...
+PINECONE_ENVIRONMENT=...
+PINECONE_INDEX_NAME=rag-system
+
+# 存储与数据库（与 backend 共用）
+STORAGE_MODE=cloud
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_KEY=your_publishable_key
+SUPABASE_SERVICE_KEY=your_service_key
+SUPABASE_STORAGE_BUCKET=rag
+DATABASE_URL=postgresql://...
+
+# Checkpoint / LangGraph
+USE_CHECKPOINT=true
+CHECKPOINT_DB_PATH=data/checkpoints/checkpoints.db
+EOF
+```
+
+### 5. 启动开发服务器
+
+```bash
+# 启动服务（首次启动会自动下载模型）
+uvicorn rag_service.main:app --host 0.0.0.0 --port 8001 --reload
+```
+
+**注意**: 
+- 首次启动可能需要 10-20 分钟，因为需要从 ModelScope 下载 Embedding 和 Reranker 模型
+- 模型会缓存在 `~/.cache/modelscope` 目录
+- 如果使用 GPU，设置 `EMBEDDING_DEVICE=cuda` 可以显著提升性能
+
+### 6. 验证服务
+
+```bash
+# 健康检查
+curl http://localhost:8001/health
+
+# 访问 API 文档
+# 浏览器打开: http://localhost:8001/docs
+```
+
+### 7. 开发注意事项
+
+- **环境隔离**: 确保使用独立的虚拟环境，不要与 `backend` 共享
+- **模型下载**: 首次运行会自动下载模型，确保网络畅通
+- **GPU 支持**: 如果有 GPU，建议使用 `EMBEDDING_DEVICE=cuda` 提升性能
+- **内存要求**: Embedding 和 Reranker 模型需要较多内存，建议至少 8GB RAM
+
+---
+
+## 服务器部署
+
 ### 1. 环境与依赖
 
 #### Python 与依赖
 
 - Python `>=3.10`
-- 通过 `rag_service/pyproject.toml` 安装依赖：
+- 创建虚拟环境并安装依赖：
 
 ```bash
 cd rag_service
+python3 -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install --upgrade pip
 pip install .
 ```
 
@@ -71,7 +199,19 @@ CHECKPOINT_DB_PATH=data/checkpoints/checkpoints.db
 
 ```bash
 cd rag_service
+source venv/bin/activate  # 如果使用虚拟环境
 uvicorn rag_service.main:app --host 0.0.0.0 --port 8001
+```
+
+**生产环境建议使用进程管理器**:
+
+```bash
+# 使用 systemd（Linux）
+# 创建 /etc/systemd/system/rag-service.service
+# 然后: sudo systemctl start rag-service
+
+# 或使用 supervisor
+# 或使用 PM2（需要安装 node）
 ```
 
 启动日志中可看到：

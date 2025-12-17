@@ -20,8 +20,11 @@ class SupabaseStorage:
         if not config.SUPABASE_URL or not config.SUPABASE_SERVICE_KEY:
             raise ValueError("Supabase URL 和 Service Key 必须配置")
         
+        # 确保 SUPABASE_URL 以斜杠结尾（Supabase 客户端要求）
+        supabase_url = config.SUPABASE_URL.rstrip('/') + '/'
+        
         self.client: Client = create_client(
-            config.SUPABASE_URL,
+            supabase_url,
             config.SUPABASE_SERVICE_KEY  # 使用 Service Key 有完整权限
         )
         self.bucket_name = config.SUPABASE_STORAGE_BUCKET
@@ -108,7 +111,9 @@ class SupabaseStorage:
             
             # 构建 TUS 上传端点
             # Supabase Storage TUS 端点格式：{SUPABASE_URL}/storage/v1/upload/resumable
-            tus_endpoint = f"{config.SUPABASE_URL}/storage/v1/upload/resumable"
+            # 确保 URL 格式正确（移除尾部斜杠，因为路径以 / 开头）
+            supabase_url = config.SUPABASE_URL.rstrip('/')
+            tus_endpoint = f"{supabase_url}/storage/v1/upload/resumable"
             
             # 准备请求头（authorization 应该在 headers 中，而不是 metadata 中）
             headers = {
@@ -206,7 +211,9 @@ class SupabaseStorage:
             encoded_path = quote(file_path, safe='')
             # 使用 S3 兼容端点：/storage/v1/object/sign/{bucket}/{path}
             # 或者直接使用：/storage/v1/object/{bucket}/{path} 配合 PUT 方法
-            upload_url = f"{config.SUPABASE_URL}/storage/v1/object/{self.bucket_name}/{encoded_path}"
+            # 确保 URL 格式正确（移除尾部斜杠，因为路径以 / 开头）
+            supabase_url = config.SUPABASE_URL.rstrip('/')
+            upload_url = f"{supabase_url}/storage/v1/object/{self.bucket_name}/{encoded_path}"
             
             # 准备请求头（S3 兼容上传需要特定的头部）
             headers = {

@@ -2,7 +2,7 @@
 向量库策略实现
 """
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, TYPE_CHECKING
 import logging
 from pathlib import Path
 
@@ -11,12 +11,18 @@ from rag_service.utils.config import config
 
 logger = logging.getLogger(__name__)
 
+# 类型检查时的导入（用于类型注解）
+if TYPE_CHECKING:
+    from langchain_chroma import Chroma
+    from langchain_pinecone import PineconeVectorStore
+
 # Chroma 相关导入（可选，本地开发使用）
 try:
     from langchain_chroma import Chroma  # type: ignore[import]
     CHROMA_AVAILABLE = True
 except ImportError:
     CHROMA_AVAILABLE = False
+    Chroma = None  # type: ignore[assignment, misc]
 
 # Pinecone 相关导入（云模式）
 try:
@@ -25,6 +31,9 @@ try:
     PINECONE_AVAILABLE = True
 except ImportError:
     PINECONE_AVAILABLE = False
+    Pinecone = None  # type: ignore[assignment, misc]
+    ServerlessSpec = None  # type: ignore[assignment, misc]
+    PineconeVectorStore = None  # type: ignore[assignment, misc]
 
 
 class VectorStoreStrategy(ABC):
@@ -88,7 +97,7 @@ class ChromaStrategy(VectorStoreStrategy):
     def _get_persist_directory(self, user_id: int) -> str:
         return f"{config.CHROMA_DB_DIR}/user_{user_id}_collection"
 
-    def get_vector_store(self, user_id: int) -> Chroma:
+    def get_vector_store(self, user_id: int) -> Any:  # 返回类型: Chroma
         cache_key = f"chroma_{user_id}"
         if cache_key in self._cache:
             return self._cache[cache_key]
@@ -152,7 +161,7 @@ class PineconeStrategy(VectorStoreStrategy):
         if not config.PINECONE_API_KEY:
             raise ValueError("VECTOR_DB_MODE=cloud 时，必须配置 PINECONE_API_KEY")
 
-    def get_vector_store(self, user_id: int) -> 'PineconeVectorStore':
+    def get_vector_store(self, user_id: int) -> Any:  # 返回类型: PineconeVectorStore
         # Pinecone 是全局单例，user_id 用于过滤，不影响实例获取
         cache_key = "pinecone_global"
         if cache_key in self._cache:
