@@ -1,7 +1,6 @@
 /**
  * 聊天 API 客户端
  */
-import request from '@/utils/request'
 import type { Session, Message, ChatMessageRequest } from '@/types/chat'
 
 // 获取 API base URL（与 request.ts 中的逻辑一致）
