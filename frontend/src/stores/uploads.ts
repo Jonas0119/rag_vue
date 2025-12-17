@@ -3,6 +3,8 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+// tus-js-client 本身类型定义比较弱，这里只在运行时使用，不强求完整类型
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 import * as tus from 'tus-js-client'
 import { documentsApi } from '@/api/documents'
 import { useDocumentsStore } from './documents'
@@ -15,7 +17,8 @@ export interface UploadTask {
   progress: number
   status: 'pending' | 'uploading' | 'success' | 'error'
   error?: string
-  uploader?: tus.Upload
+  // 这里不强制使用 tus 的具体类型，避免构建时报错
+  uploader?: any
 }
 
 export const useUploadStore = defineStore('uploads', () => {
@@ -86,7 +89,7 @@ export const useUploadStore = defineStore('uploads', () => {
         'x-upsert': 'false'
       },
       chunkSize: 6 * 1024 * 1024,
-      onProgress(bytesSent, bytesTotal) {
+      onProgress(bytesSent: number, bytesTotal: number) {
         const percent = bytesTotal > 0 ? Math.round((bytesSent / bytesTotal) * 100) : 0
         updateTask(doc_id, { progress: percent, status: 'uploading' })
       },
@@ -101,8 +104,8 @@ export const useUploadStore = defineStore('uploads', () => {
           failTask(doc_id, e?.message || '确认上传失败')
         }
       },
-      onError(error) {
-        failTask(doc_id, error.message || '上传失败')
+      onError(error: any) {
+        failTask(doc_id, error?.message || '上传失败')
       }
     })
 
