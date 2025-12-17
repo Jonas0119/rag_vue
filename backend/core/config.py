@@ -54,8 +54,8 @@ class Settings:
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRY_DAYS: int = AUTH_COOKIE_EXPIRY_DAYS
     
-    # 文件上传配置
-    MAX_UPLOAD_SIZE: int = int(os.getenv("MAX_FILE_SIZE", 20 * 1024 * 1024))  # 20MB
+    # 文件上传配置（与 utils.config.MAX_FILE_SIZE 一致，默认 30MB）
+    MAX_UPLOAD_SIZE: int = int(os.getenv("MAX_FILE_SIZE", 30 * 1024 * 1024))  # 30MB
     UPLOAD_DIR: Path = BASE_DIR / "data" / "uploads"
     
     # 调试模式

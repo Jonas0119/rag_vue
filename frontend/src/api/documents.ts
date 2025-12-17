@@ -14,23 +14,38 @@ export const documentsApi = {
   },
 
   /**
-   * 上传文档（异步处理）
+   * 初始化 TUS 上传（仅创建文档记录并返回 Supabase 配置）
    */
-  async uploadDocument(file: File): Promise<{ success: boolean; message: string; doc_id?: string; status?: string }> {
-    const formData = new FormData()
-    formData.append('file', file)
+  async initTusUpload(file: File): Promise<{
+    endpoint: string
+    bucket: string
+    object_name: string
+    doc_id: string
+    max_file_size: number
+    supabase_anon_key?: string
+  }> {
+    const response = await request.post<{
+      endpoint: string
+      bucket: string
+      object_name: string
+      doc_id: string
+      max_file_size: number
+      supabase_anon_key?: string
+    }>('/documents/tus-init', {
+      filename: file.name,
+      file_size: file.size,
+      content_type: file.type || 'application/octet-stream'
+    })
+    return response.data
+  },
 
+  /**
+   * 通知后端上传已完成，触发后台文档处理
+   */
+  async confirmUpload(docId: string): Promise<{ success: boolean; message: string; doc_id?: string; status?: string }> {
     const response = await request.post<{ success: boolean; message: string; doc_id?: string; status?: string }>(
-      '/documents/upload',
-      formData,
-      {
-        // 不要手动设置 Content-Type，让浏览器自动设置（包括 boundary）
-        // 手动设置会覆盖掉 boundary，导致后端无法解析 multipart/form-data
-        headers: {
-          // 移除 Content-Type，让浏览器自动设置
-        },
-        timeout: 120000 // 增加到 120 秒，支持大文件上传和移动端较慢的网络
-      }
+      `/documents/${docId}/confirm-upload`,
+      {}
     )
     return response.data
   },

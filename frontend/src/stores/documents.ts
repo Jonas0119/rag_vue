@@ -5,6 +5,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { documentsApi } from '@/api/documents'
 import type { Document, DocumentStatus } from '@/types/documents'
+import { useUploadStore } from './uploads'
 
 export const useDocumentsStore = defineStore('documents', () => {
   const documents = ref<Document[]>([])
@@ -25,22 +26,16 @@ export const useDocumentsStore = defineStore('documents', () => {
   }
 
   /**
-   * 上传文档（异步处理）
-   * 返回 doc_id，文档会立即显示在列表中
+   * 启动文档上传（使用 TUS 分片），不阻塞页面。
+   * 返回 doc_id，文档会立即显示在列表中，由上传 Store 负责具体上传与进度。
    */
   async function uploadDocument(file: File): Promise<string | null> {
+    const uploadStore = useUploadStore()
     isLoading.value = true
     try {
-      const result = await documentsApi.uploadDocument(file)
-      const docId = result.doc_id || null
-      
-      if (docId) {
-        // 立即刷新文档列表（包含新上传的 processing 状态文档）
-        // 这样用户可以看到新上传的文档条目，状态为"处理中"
-        await fetchDocuments()
-      }
-      
-      return docId
+      // 由上传 Store 负责完整的 TUS 上传流程
+      const taskDocId = await uploadStore.startUpload(file)
+      return taskDocId
     } finally {
       isLoading.value = false
     }

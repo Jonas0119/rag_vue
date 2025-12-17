@@ -127,7 +127,229 @@ Backend 不再需要 `INFERENCE_API_BASE_URL`、`USE_REMOTE_EMBEDDINGS`、`USE_R
 - [ ] 向量检索（验证 Pinecone）
 - [ ] 智能问答功能
 
-## 🔍 故障排查
+## 三、本地环境搭建与开发
+
+> 以下内容整合自原 `ENVIRONMENT_SETUP.md`，帮助你在本地同时搭建 backend、rag_service 和 frontend 的开发环境。
+
+---
+
+### 1. 前置要求
+
+- **Python**: >= 3.10, < 3.14  
+- **Node.js**: >= 18.0.0  
+- **npm** 或 **yarn**: 最新版本  
+
+示例安装命令：
+
+```bash
+# macOS
+brew install python@3.11 node
+
+# Ubuntu/Debian
+sudo apt-get update
+sudo apt-get install python3.11 python3.11-venv nodejs npm
+```
+
+---
+
+### 2. Backend 本地环境
+
+#### 2.1 创建虚拟环境并安装依赖
+
+```bash
+# 进入项目根目录
+cd /path/to/rag_vue
+
+# 创建 backend 专用虚拟环境
+python3 -m venv backend/venv
+
+# 激活虚拟环境
+# macOS/Linux:
+source backend/venv/bin/activate
+# Windows:
+# backend\venv\Scripts\activate
+
+# 安装依赖
+cd backend
+pip install --upgrade pip
+pip install .
+```
+
+#### 2.2 配置环境变量
+
+```bash
+cd backend
+cp config_template.txt .env
+
+# 编辑 .env 文件，至少配置：
+# - SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_KEY
+# - DATABASE_URL（cloud 模式）或 DATABASE_PATH（local 模式）
+# - JWT_SECRET_KEY
+# - RAG_SERVICE_URL
+```
+
+#### 2.3 启动与验证
+
+```bash
+cd backend
+source venv/bin/activate  # Windows: venv\Scripts\activate
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+# 健康检查
+curl http://localhost:8000/health
+# 浏览器访问: http://localhost:8000/docs
+```
+
+---
+
+### 3. RAG Service 本地环境
+
+#### 3.1 创建虚拟环境并安装依赖
+
+```bash
+cd /path/to/rag_vue
+
+python3 -m venv rag_service/venv
+
+# 激活虚拟环境
+# macOS/Linux:
+source rag_service/venv/bin/activate
+# Windows:
+# rag_service\venv\Scripts\activate
+
+cd rag_service
+pip install --upgrade pip
+pip install .
+```
+
+#### 3.2 配置环境变量
+
+```bash
+cd rag_service
+
+cat > .env << EOF
+# LLM / API
+ANTHROPIC_API_KEY=sk-xxx
+ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
+LLM_MODEL=MiniMax-M2
+
+# Embedding & Reranker
+EMBEDDING_MODEL=BAAI/bge-large-zh-v1.5
+EMBEDDING_DEVICE=cpu  # 或 cuda（如果有 GPU）
+NORMALIZE_EMBEDDINGS=true
+RERANKER_MODEL=BAAI/bge-reranker-base
+MODEL_DOWNLOAD_SOURCE=modelscope
+
+# 向量库
+VECTOR_DB_MODE=cloud  # cloud: Pinecone, local: Chroma
+PINECONE_API_KEY=...
+PINECONE_ENVIRONMENT=...
+PINECONE_INDEX_NAME=rag-system
+
+# 存储与数据库
+STORAGE_MODE=cloud
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_KEY=your_publishable_key
+SUPABASE_SERVICE_KEY=your_service_key
+SUPABASE_STORAGE_BUCKET=rag
+DATABASE_URL=postgresql://...
+
+# Checkpoint / LangGraph
+USE_CHECKPOINT=true
+CHECKPOINT_DB_PATH=data/checkpoints/checkpoints.db
+EOF
+```
+
+#### 3.3 启动与验证
+
+```bash
+cd rag_service
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# 首次启动会自动下载 Embedding / Reranker 模型
+uvicorn rag_service.main:app --host 0.0.0.0 --port 8001
+
+curl http://localhost:8001/health
+# 浏览器访问: http://localhost:8001/docs
+```
+
+---
+
+### 4. Frontend 本地环境
+
+#### 4.1 安装依赖
+
+```bash
+cd /path/to/rag_vue/frontend
+npm install
+# 或 yarn install
+```
+
+#### 4.2 配置环境变量
+
+```bash
+cd frontend
+
+cat > .env.local << EOF
+VITE_API_BASE_URL=http://localhost:8000
+EOF
+```
+
+#### 4.3 启动与验证
+
+```bash
+cd frontend
+npm run dev
+# 或 yarn dev
+
+# 浏览器访问: http://localhost:5173
+```
+
+---
+
+### 5. 同时运行三个服务
+
+```bash
+# 终端1: Backend
+cd backend
+source venv/bin/activate
+uvicorn main:app --reload --port 8000
+
+# 终端2: RAG Service
+cd rag_service
+source venv/bin/activate
+uvicorn rag_service.main:app --host 0.0.0.0 --port 8001
+
+# 终端3: Frontend
+cd frontend
+npm run dev
+```
+
+可选：使用 `tmux`/`screen` 或 Docker Compose 来管理多个进程（参见原 `ENVIRONMENT_SETUP.md` 中的示例）。
+
+---
+
+### 6. 快速参考
+
+```bash
+# Backend 快速启动
+cd backend
+source venv/bin/activate  # Windows: venv\Scripts\activate
+uvicorn main:app --reload --port 8000
+
+# RAG Service 快速启动
+cd rag_service
+source venv/bin/activate  # Windows: venv\Scripts\activate
+uvicorn rag_service.main:app --host 0.0.0.0 --port 8001
+
+# Frontend 快速启动
+cd frontend
+npm run dev
+```
+
+---
+
+## 四、故障排查
 
 ### 问题 1: 构建失败
 

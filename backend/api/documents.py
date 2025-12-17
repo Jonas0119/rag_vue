@@ -3,6 +3,8 @@
 """
 import os
 import logging
+import time
+from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
 from pydantic import BaseModel
@@ -40,6 +42,37 @@ class DocumentStatusResponse(BaseModel):
     error_message: Optional[str] = None
 
 
+class UploadUrlRequest(BaseModel):
+    """前端请求生成直传 Supabase 的上传 URL"""
+    filename: str
+    file_size: int
+    content_type: Optional[str] = None
+
+
+class UploadUrlResponse(BaseModel):
+    """返回给前端的上传 URL 信息"""
+    upload_url: str
+    doc_id: str
+    status: str
+
+
+class TusInitRequest(BaseModel):
+    """前端请求初始化 TUS 大文件上传"""
+    filename: str
+    file_size: int
+    content_type: Optional[str] = None
+
+
+class TusInitResponse(BaseModel):
+    """返回给前端的 TUS 上传配置"""
+    endpoint: str
+    bucket: str
+    object_name: str
+    doc_id: str
+    max_file_size: int
+    supabase_anon_key: Optional[str] = None
+
+
 @router.get("/documents", response_model=List[DocumentResponse])
 async def get_documents(
     user: User = Depends(get_current_user_dependency)
@@ -50,39 +83,255 @@ async def get_documents(
     Returns:
         文档列表（只包含 active 和 processing 状态的文档）
     """
+    start_ts = time.perf_counter()
+    from backend.database import DocumentDAO
+    from backend.utils.file_handler import format_file_size
+
+    logger.info(
+        "[perf][/api/documents] start | user_id=%s",
+        getattr(user, "user_id", None),
+    )
+
     # 直接查询数据库，只获取 active 和 processing 状态的文档
     # 排除 deleted 状态的文档（已硬删除，不应显示）
-    from backend.database import DocumentDAO
+    db_start = time.perf_counter()
     doc_dao = DocumentDAO()
-    
-    # 获取所有状态的文档（排除 deleted），传入 None 会自动过滤 deleted
     docs = doc_dao.get_user_documents(user.user_id, status=None)
-    
+    db_end = time.perf_counter()
+
     # 转换为字典格式
-    from backend.utils.file_handler import format_file_size
+    serialize_start = time.perf_counter()
     documents = []
     for doc in docs:
         doc_dict = doc.to_dict()
-        doc_dict['file_size_formatted'] = format_file_size(doc.file_size)
+        doc_dict["file_size_formatted"] = format_file_size(doc.file_size)
         documents.append(doc_dict)
-    
+    serialize_end = time.perf_counter()
+
+    # 统计并打印耗时
+    total_ms = (time.perf_counter() - start_ts) * 1000
+    db_ms = (db_end - db_start) * 1000
+    serialize_ms = (serialize_end - serialize_start) * 1000
+
+    logger.info(
+        "[perf][/api/documents] done | user_id=%s, total=%.1fms, db=%.1fms, serialize=%.1fms, count=%d",
+        getattr(user, "user_id", None),
+        total_ms,
+        db_ms,
+        serialize_ms,
+        len(documents),
+    )
+
     # 返回响应
     return [
         DocumentResponse(
-            doc_id=doc['doc_id'],
-            user_id=doc['user_id'],
-            filename=doc['filename'],
-            original_filename=doc['original_filename'],
-            file_size=doc['file_size'],
-            file_type=doc['file_type'],
-            page_count=doc.get('page_count'),
-            chunk_count=doc.get('chunk_count', 0),
-            upload_at=doc.get('upload_at'),
-            status=doc.get('status', 'active'),
-            error_message=doc.get('error_message')
+            doc_id=doc["doc_id"],
+            user_id=doc["user_id"],
+            filename=doc["filename"],
+            original_filename=doc["original_filename"],
+            file_size=doc["file_size"],
+            file_type=doc["file_type"],
+            page_count=doc.get("page_count"),
+            chunk_count=doc.get("chunk_count", 0),
+            upload_at=doc.get("upload_at"),
+            status=doc.get("status", "active"),
+            error_message=doc.get("error_message"),
         )
         for doc in documents
     ]
+
+
+@router.post("/documents/upload-url", response_model=UploadUrlResponse)
+async def create_upload_url(
+    request: UploadUrlRequest,
+    user: User = Depends(get_current_user_dependency),
+):
+    """
+    创建 Supabase Storage 的签名上传 URL，让前端可以直接将大文件上传到 Supabase，
+    避免经过 Vercel 的 Body 限制。
+
+    流程：
+    1. 前端提交文件名、大小、类型到该接口；
+    2. 后端校验类型 & 大小，生成安全文件名和存储路径；
+    3. 在数据库中创建文档记录（status=processing / uploading）；
+    4. 使用 Service Key 调用 Supabase，生成签名上传 URL；
+    5. 将 upload_url + doc_id 返回给前端；
+    6. 前端使用 upload_url 直传文件，上传完成后再调用 confirm-upload 接口触发后台处理。
+    """
+    from backend.utils.config import config as app_config
+    from backend.utils.file_handler import generate_safe_filename
+    from backend.utils.supabase_storage import get_supabase_storage
+    from backend.database import DocumentDAO
+
+    # 仅在云存储模式下支持直传
+    if app_config.STORAGE_MODE != "cloud":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="当前存储模式不支持直传，请将 STORAGE_MODE 设置为 cloud",
+        )
+
+    # 验证文件类型（当前仅支持 PDF）
+    if not is_allowed_file(request.filename):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不支持的文件类型。当前仅支持 PDF 文件（.pdf）",
+        )
+
+    # 验证文件大小（业务层面限制，例如 30MB）
+    valid, error_msg = validate_file_size(request.file_size, app_config.MAX_FILE_SIZE)
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_msg,
+        )
+
+    storage = get_supabase_storage()
+    if storage is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Supabase Storage 未配置或初始化失败，无法生成上传链接",
+        )
+
+    # 生成安全文件名与存储路径（保持与原有逻辑一致）
+    safe_filename = generate_safe_filename(request.filename)
+    filepath = f"user_{user.user_id}/{safe_filename}"
+    file_ext = Path(request.filename).suffix.lower()
+
+    # 先创建文档记录，状态为 processing（与原 create_document 一致）
+    from backend.database import DocumentDAO
+
+    doc_dao = DocumentDAO()
+    vector_collection = f"user_{user.user_id}_docs"
+
+    try:
+        doc_id = doc_dao.create_document(
+            user_id=user.user_id,
+            filename=safe_filename,
+            original_filename=request.filename,
+            filepath=filepath,
+            file_size=request.file_size,
+            file_type=file_ext,
+            page_count=None,
+            vector_collection=vector_collection,
+        )
+    except Exception as e:
+        logger.error(f"[文档上传] 创建文档记录失败: {request.filename}, error={e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"创建文档记录失败：{e}",
+        )
+
+    # 创建签名上传 URL
+    ok, url_or_error = storage.create_signed_upload_url(filepath)
+    if not ok:
+        # 回滚文档记录
+        try:
+            doc_dao.hard_delete_document(doc_id)
+        except Exception:
+            logger.warning(f"[文档上传] 回滚文档记录失败: doc_id={doc_id}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"创建上传链接失败：{url_or_error}",
+        )
+
+    logger.info(
+        f"[文档上传] 用户 {user.user_id} 请求直传文件: {request.filename}, "
+        f"doc_id={doc_id}, size={request.file_size} bytes, path={filepath}"
+    )
+
+    return UploadUrlResponse(
+        upload_url=url_or_error,
+        doc_id=doc_id,
+        status="uploading",
+    )
+
+
+@router.post("/documents/tus-init", response_model=TusInitResponse)
+async def tus_init(
+    request: TusInitRequest,
+    user: User = Depends(get_current_user_dependency),
+):
+    """
+    初始化 Supabase TUS 大文件上传配置。
+
+    流程：
+    1. 前端提交文件元数据（名称、大小、类型）；
+    2. 后端校验类型 & 大小，生成安全文件名和存储路径；
+    3. 在数据库中创建文档记录（status=processing）；
+    4. 返回 Supabase TUS 端点、bucket 名称、objectName、doc_id、最大文件大小等；
+    5. 前端使用 tus-js-client 直接将文件上传到 Supabase。
+    """
+    from backend.utils.config import config as app_config
+    from backend.utils.file_handler import generate_safe_filename
+    from backend.database import DocumentDAO
+
+    # 仅在云存储模式下支持直传
+    if app_config.STORAGE_MODE != "cloud":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="当前存储模式不支持直传，请将 STORAGE_MODE 设置为 cloud",
+        )
+
+    # 验证文件类型（当前仅支持 PDF）
+    if not is_allowed_file(request.filename):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不支持的文件类型。当前仅支持 PDF 文件（.pdf）",
+        )
+
+    # 验证文件大小（业务层面限制，例如 30MB）
+    valid, error_msg = validate_file_size(request.file_size, app_config.MAX_FILE_SIZE)
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_msg,
+        )
+
+    # 生成安全文件名与存储路径（保持与原有逻辑一致）
+    safe_filename = generate_safe_filename(request.filename)
+    object_name = f"user_{user.user_id}/{safe_filename}"
+    file_ext = Path(request.filename).suffix.lower()
+
+    # 在数据库中创建文档记录
+    doc_dao = DocumentDAO()
+    vector_collection = f"user_{user.user_id}_docs"
+
+    try:
+        doc_id = doc_dao.create_document(
+            user_id=user.user_id,
+            filename=safe_filename,
+            original_filename=request.filename,
+            filepath=object_name,
+            file_size=request.file_size,
+            file_type=file_ext,
+            page_count=None,
+            vector_collection=vector_collection,
+        )
+    except Exception as e:
+        logger.error(f"[文档上传] 创建文档记录失败(tus-init): {request.filename}, error={e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"创建文档记录失败：{e}",
+        )
+
+    # Supabase TUS 端点
+    supabase_url = app_config.SUPABASE_URL.rstrip("/")
+    endpoint = f"{supabase_url}/storage/v1/upload/resumable"
+
+    logger.info(
+        f"[文档上传] TUS 初始化: user_id={user.user_id}, doc_id={doc_id}, "
+        f"object_name={object_name}, size={request.file_size}"
+    )
+
+    return TusInitResponse(
+        endpoint=endpoint,
+        bucket=app_config.SUPABASE_STORAGE_BUCKET,
+        object_name=object_name,
+        doc_id=doc_id,
+        max_file_size=app_config.MAX_FILE_SIZE,
+        # 传递 anon key 给前端用于 TUS 认证（权限由 Supabase Policy 控制）
+        supabase_anon_key=app_config.SUPABASE_KEY or None,
+    )
 
 
 @router.post("/documents/upload")
@@ -230,6 +479,62 @@ async def upload_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"上传失败：{str(e)}"
         )
+
+
+@router.post("/documents/{doc_id}/confirm-upload")
+async def confirm_upload(
+    doc_id: str,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user_dependency),
+):
+    """
+    前端在成功将文件直传到 Supabase 之后调用该接口，
+    用于触发后台文档处理流程（解析 + 分块 + 向量化）。
+
+    注意：如果上传失败但仍然调用了该接口，后台任务在下载文件时会失败，
+    并将文档标记为 error 状态。
+    """
+    from backend.database import DocumentDAO
+    from backend.utils.config import config as app_config
+
+    doc_dao = DocumentDAO()
+    doc = doc_dao.get_document(doc_id)
+
+    # 验证文档存在且属于当前用户
+    if not doc or doc.user_id != user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="文档不存在或无权限",
+        )
+
+    # 仅在云存储模式下允许该流程
+    if app_config.STORAGE_MODE != "cloud":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="当前存储模式不支持该操作，请将 STORAGE_MODE 设置为 cloud",
+        )
+
+    file_ext = doc.file_type or Path(doc.filepath).suffix.lower()
+
+    logger.info(
+        f"[文档上传] 接收到确认上传请求: doc_id={doc_id}, user_id={user.user_id}, filepath={doc.filepath}"
+    )
+
+    # 触发后台处理任务（与原 /documents/upload 逻辑保持一致）
+    background_tasks.add_task(
+        process_document_background,
+        user.user_id,
+        doc_id,
+        doc.filepath,
+        file_ext,
+    )
+
+    return {
+        "success": True,
+        "message": "已确认上传，文档处理中...",
+        "doc_id": doc_id,
+        "status": "processing",
+    }
 
 
 def process_document_background(user_id: int, doc_id: str, filepath: str, file_ext: str):

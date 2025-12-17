@@ -19,7 +19,7 @@ DATA_ROOT_DIR=data
 USER_DATA_DIR=data/users
 CHROMA_DB_DIR=data/chroma
 DATABASE_PATH=data/database/rag_system.db
-MAX_FILE_SIZE=20971520
+MAX_FILE_SIZE=31457280
 
 # ==================== Supabase 配置 ====================
 # 获取方式：Supabase Dashboard -> Settings -> API

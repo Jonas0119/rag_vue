@@ -5,53 +5,62 @@
     </div>
 
     <div class="chat-messages" ref="messagesContainer">
-      <div
-        v-for="(message, index) in chatStore.messages"
-        :key="index"
-        :class="['message', message.role]"
-      >
-        <div class="message-content">
-          <div
-            class="message-actions"
-            v-if="message.message_id !== undefined"
-          >
-            <button
-              class="delete-btn"
-              type="button"
-              @click="handleDeleteMessage(message)"
-            >
-              删除
-            </button>
-          </div>
-          <div class="message-text" v-html="formatMessage(message.content)"></div>
-          
-          <div v-if="message.retrieved_docs && message.retrieved_docs.length > 0" class="retrieved-docs">
-            <details>
-              <summary>📄 检索到的文档片段 ({{ message.retrieved_docs.length }})</summary>
-              <div v-for="(doc, idx) in message.retrieved_docs" :key="idx" class="doc-item">
-                <div class="doc-header">
-                  <span>片段 {{ idx + 1 }}</span>
-                  <span v-if="doc.similarity" class="similarity">
-                    相似度: {{ (doc.similarity * 100).toFixed(0) }}%
-                  </span>
-                </div>
-                <div class="doc-content">{{ doc.content }}</div>
-              </div>
-            </details>
-          </div>
+      <!-- 会话消息加载中：清空旧内容并显示 loading -->
+      <div v-if="chatStore.isLoadingMessages" class="loading-state">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">正在加载会话内容...</div>
+      </div>
 
-          <div v-if="message.thinking_process && message.thinking_process.length > 0" class="thinking-process">
-            <details>
-              <summary>💭 AI 思考过程</summary>
-              <div v-for="step in message.thinking_process" :key="step.step" class="thinking-step">
-                <strong>步骤 {{ step.step }}: {{ step.action }}</strong>
-                <p>{{ step.description }}</p>
-                <pre v-if="step.details">{{ step.details }}</pre>
-              </div>
-            </details>
+      <!-- 已加载消息 -->
+      <template v-else>
+        <div
+          v-for="(message, index) in chatStore.messages"
+          :key="index"
+          :class="['message', message.role]"
+        >
+          <div class="message-content">
+            <div
+              class="message-actions"
+              v-if="message.message_id !== undefined"
+            >
+              <button
+                class="delete-btn"
+                type="button"
+                @click="handleDeleteMessage(message)"
+              >
+                删除
+              </button>
+            </div>
+            <div class="message-text" v-html="formatMessage(message.content)"></div>
+            
+            <div v-if="message.retrieved_docs && message.retrieved_docs.length > 0" class="retrieved-docs">
+              <details>
+                <summary>📄 检索到的文档片段 ({{ message.retrieved_docs.length }})</summary>
+                <div v-for="(doc, idx) in message.retrieved_docs" :key="idx" class="doc-item">
+                  <div class="doc-header">
+                    <span>片段 {{ idx + 1 }}</span>
+                    <span v-if="doc.similarity" class="similarity">
+                      相似度: {{ (doc.similarity * 100).toFixed(0) }}%
+                    </span>
+                  </div>
+                  <div class="doc-content">{{ doc.content }}</div>
+                </div>
+              </details>
+            </div>
+
+            <div v-if="message.thinking_process && message.thinking_process.length > 0" class="thinking-process">
+              <details>
+                <summary>💭 AI 思考过程</summary>
+                <div v-for="step in message.thinking_process" :key="step.step" class="thinking-step">
+                  <strong>步骤 {{ step.step }}: {{ step.action }}</strong>
+                  <p>{{ step.description }}</p>
+                  <pre v-if="step.details">{{ step.details }}</pre>
+                </div>
+              </details>
+            </div>
           </div>
         </div>
-      </div>
+      </template>
 
       <div v-if="chatStore.isStreaming" class="message assistant">
         <div class="message-content">
@@ -112,7 +121,7 @@
           v-model="inputMessage"
           placeholder="输入您的问题..."
           rows="3"
-          :disabled="chatStore.isStreaming"
+          :disabled="chatStore.isStreaming || chatStore.isLoadingMessages"
           @keydown.enter.exact.prevent="handleSendMessage"
           @keydown.shift.enter.exact="inputMessage += '\n'"
         ></textarea>
@@ -339,6 +348,38 @@ watch(() => chatStore.messages.length, () => {
   flex-direction: column;
   gap: var(--spacing-xl);
   margin-bottom: var(--spacing-xl);
+}
+
+.loading-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  gap: var(--spacing-md);
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  animation: spin 0.8s linear infinite;
+}
+
+.loading-text {
+  font-size: 14px;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .message {

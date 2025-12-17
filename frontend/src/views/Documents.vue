@@ -33,6 +33,29 @@
               状态: {{ getStatusText(doc.status) }}
             </span>
           </div>
+          <!-- 上传进度展示（基于上传任务 Store） -->
+          <template v-if="getUploadTaskByDocId(doc.doc_id)">
+            <div
+              v-if="getUploadTaskByDocId(doc.doc_id)?.status === 'uploading'"
+              class="upload-progress"
+            >
+              <div class="upload-progress-bar">
+                <div
+                  class="upload-progress-inner"
+                  :style="{ width: getUploadTaskByDocId(doc.doc_id)!.progress + '%' }"
+                ></div>
+              </div>
+              <div class="upload-progress-text">
+                上传中 {{ getUploadTaskByDocId(doc.doc_id)!.progress }}%
+              </div>
+            </div>
+            <div
+              v-else-if="getUploadTaskByDocId(doc.doc_id)?.status === 'error'"
+              class="upload-error"
+            >
+              上传失败：{{ getUploadTaskByDocId(doc.doc_id)?.error || '请稍后重试' }}
+            </div>
+          </template>
           <div v-if="doc.status === 'processing'" class="processing-message">
             ⏳ 正在处理中，请稍候...
           </div>
@@ -89,8 +112,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useDocumentsStore } from '@/stores/documents'
+import { useUploadStore } from '@/stores/uploads'
 
 const documentsStore = useDocumentsStore()
+const uploadStore = useUploadStore()
 const showUploadDialog = ref(false)
 const selectedFile = ref<File | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -117,6 +142,10 @@ function getStatusText(status: string): string {
   return statusMap[status] || status
 }
 
+function getUploadTaskByDocId(docId: string) {
+  return uploadStore.tasks.find(task => task.docId === docId)
+}
+
 function handleFileSelect(event: Event) {
   const target = event.target as HTMLInputElement
   if (target.files && target.files[0]) {
@@ -136,25 +165,17 @@ async function handleUpload() {
 
   uploading.value = true
   try {
-    // 上传文档（立即返回，后台处理）
-    // uploadDocument 内部会立即刷新列表，显示新上传的文档
+    // 启动上传（后台 TUS 分片），不阻塞页面
     const docId = await documentsStore.uploadDocument(selectedFile.value)
-    
-    if (docId) {
-      // 关闭上传对话框
-      showUploadDialog.value = false
-      selectedFile.value = null
-      
-      // 可选：自动轮询状态直到完成
-      // 在后台静默轮询，不阻塞用户操作
-      if (docId) {
-        documentsStore.pollDocumentStatus(docId).catch(err => {
-          console.error('状态轮询失败:', err)
-        })
-      }
-    } else {
+
+    if (!docId) {
       alert('上传失败：未返回文档ID')
+      return
     }
+
+    // 关闭上传对话框，重置选择
+    showUploadDialog.value = false
+    selectedFile.value = null
   } catch (error: any) {
     alert(error.message || '上传失败')
   } finally {
@@ -291,6 +312,37 @@ async function handleDelete(docId: string) {
   font-size: 13px;
   margin-top: var(--spacing-sm);
   font-weight: 500;
+}
+
+.upload-progress {
+  margin-top: var(--spacing-sm);
+}
+
+.upload-progress-bar {
+  width: 160px;
+  max-width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.upload-progress-inner {
+  height: 100%;
+  background: var(--color-primary);
+  transition: width 0.2s ease-out;
+}
+
+.upload-progress-text {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-top: 4px;
+}
+
+.upload-error {
+  font-size: 12px;
+  color: var(--color-danger);
+  margin-top: 4px;
 }
 
 .error-message {

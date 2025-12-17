@@ -25,6 +25,7 @@ export const useChatStore = defineStore('chat', () => {
   const isStreaming = ref(false)
   const hasTimeout = ref(false)
   const activeNodes = ref<NodeStatus[]>([])  // 当前执行的节点列表
+  const isLoadingMessages = ref(false)       // 会话消息加载中
   // 轮询控制
   let pollingAbort = { aborted: false }
 
@@ -71,8 +72,20 @@ export const useChatStore = defineStore('chat', () => {
    * 选择会话
    */
   async function selectSession(sessionId: string): Promise<void> {
+    // 切换会话时，先清空当前消息并进入“加载中”状态，避免短暂显示旧会话内容
     currentSessionId.value = sessionId
-    await fetchSessionMessages(sessionId)
+    messages.value = []
+    currentMessage.value = ''
+    activeNodes.value = []
+    stopStreaming()
+    hasTimeout.value = false
+
+    isLoadingMessages.value = true
+    try {
+      await fetchSessionMessages(sessionId)
+    } finally {
+      isLoadingMessages.value = false
+    }
     // 选择会话后，基于实际消息数量更新会话的消息计数
     updateSessionMessageCountFromMessages(sessionId)
   }
@@ -99,10 +112,15 @@ export const useChatStore = defineStore('chat', () => {
    * 获取会话消息
    */
   async function fetchSessionMessages(sessionId: string): Promise<void> {
+    // 如果当前没有消息且 session 发生变化，也进入加载状态
+    if (!messages.value.length || currentSessionId.value !== sessionId) {
+      isLoadingMessages.value = true
+    }
     const messageList = await chatApi.getSessionMessages(sessionId)
     messages.value = messageList
     // 获取消息后，更新会话的消息计数
     updateSessionMessageCountFromMessages(sessionId)
+    isLoadingMessages.value = false
   }
 
   /**
@@ -336,6 +354,7 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming,
     hasTimeout,
     activeNodes,
+    isLoadingMessages,
     currentSession,
     fetchSessions,
     loadLatestSession,

@@ -2,6 +2,7 @@
 FastAPI 应用主入口
 """
 import logging
+import os
 import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -136,6 +137,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.core.config import settings
+from backend.utils.config import config as backend_config
 
 # 配置日志
 logging.basicConfig(
@@ -151,9 +153,78 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期管理（Backend 仅作为轻量网关，不加载任何模型）"""
+    """
+    应用生命周期管理（Backend 仅作为轻量网关，不加载任何模型）
+    
+    在启动阶段预热轻量级单例资源（数据库、服务、云存储），
+    减少首个请求的延迟。
+    """
     logger.info("🚀 FastAPI 网关启动中...")
+
+    # 是否启用预热（可通过环境变量控制，默认启用）
+    warmup_enabled = os.getenv("BACKEND_WARMUP_ENABLED", "true").lower() == "true"
+    warmup_status = {
+        "db": False,
+        "services": False,
+        "storage": False,
+    }
+
+    if warmup_enabled:
+        # 预热数据库（创建全局管理器，并进行一次轻量查询）
+        try:
+            from backend.database.db_manager import get_db_manager
+
+            db = get_db_manager()
+            try:
+                # 轻量自检：不同数据库下都几乎无开销
+                db.execute_one("SELECT 1")
+            except Exception:
+                # 如果执行查询失败，不影响整体启动，只记录日志
+                logger.warning("⚠️ 数据库预热查询失败，但应用仍然继续启动", exc_info=True)
+            warmup_status["db"] = True
+            logger.info("✅ [warmup] 数据库管理器初始化完成")
+        except Exception as e:
+            logger.warning(f"⚠️ [warmup] 数据库预热失败: {e}", exc_info=True)
+
+        # 预热核心服务（用户 / 会话 / 文档元数据）
+        try:
+            from backend.services import (
+                get_document_service,
+                get_session_service,
+                get_user_service,
+            )
+
+            get_document_service()
+            get_session_service()
+            get_user_service()
+            warmup_status["services"] = True
+            logger.info("✅ [warmup] 核心服务初始化完成")
+        except Exception as e:
+            logger.warning(f"⚠️ [warmup] 服务预热失败: {e}", exc_info=True)
+
+        # 预热 Supabase Storage（仅在云存储模式下）
+        if backend_config.STORAGE_MODE == "cloud":
+            try:
+                from backend.utils.supabase_storage import get_supabase_storage
+
+                storage = get_supabase_storage()
+                if storage is not None:
+                    warmup_status["storage"] = True
+                    logger.info("✅ [warmup] SupabaseStorage 初始化完成")
+                else:
+                    logger.warning("⚠️ [warmup] SupabaseStorage 未启用或配置不完整，跳过预热")
+            except Exception as e:
+                logger.warning(f"⚠️ [warmup] SupabaseStorage 预热失败: {e}", exc_info=True)
+        else:
+            logger.info("ℹ️ [warmup] STORAGE_MODE!=cloud，跳过 SupabaseStorage 预热")
+    else:
+        logger.info("ℹ️ BACKEND_WARMUP_ENABLED=false，跳过预热逻辑")
+
+    # 将预热结果挂到 app.state，便于健康检查与调试
+    app.state.warmup_status = warmup_status
+
     yield
+
     logger.info("🛑 FastAPI 网关关闭中...")
 
 
@@ -204,8 +275,45 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """健康检查"""
-    return {"status": "healthy"}
+    """
+    健康检查
+    
+    返回网关自身状态及关键依赖的基础健康信息。
+    """
+    db_ok = False
+    storage_ok = False
+    rag_service_configured = bool(backend_config.RAG_SERVICE_URL)
+
+    # 数据库健康检查：尝试一次轻量查询
+    try:
+        from backend.database.db_manager import get_db_manager
+
+        db = get_db_manager()
+        db.execute_one("SELECT 1")
+        db_ok = True
+    except Exception as e:
+        logger.warning(f"⚠️ [health] 数据库检查失败: {e}", exc_info=True)
+
+    # Supabase Storage 健康检查（仅云模式，且不会抛错）
+    if backend_config.STORAGE_MODE == "cloud":
+        try:
+            from backend.utils.supabase_storage import get_supabase_storage
+
+            storage = get_supabase_storage()
+            storage_ok = storage is not None
+        except Exception as e:
+            logger.warning(f"⚠️ [health] SupabaseStorage 检查失败: {e}", exc_info=True)
+
+    # 预热状态（如果存在）
+    warmup_status = getattr(app.state, "warmup_status", {})
+
+    return {
+        "status": "healthy",
+        "db_ok": db_ok,
+        "storage_ok": storage_ok,
+        "rag_service_configured": rag_service_configured,
+        "warmup": warmup_status,
+    }
 
 
 # 导入并注册路由

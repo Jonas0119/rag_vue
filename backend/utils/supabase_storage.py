@@ -93,6 +93,33 @@ class SupabaseStorage:
                 error_msg = str(e)
                 logger.error(f"[Supabase Storage] 文件上传失败: {file_path}, 错误: {error_msg}")
                 return False, error_msg
+
+    def create_signed_upload_url(self, file_path: str) -> Tuple[bool, str]:
+        """
+        创建用于直传的签名上传 URL（前端可直接使用该 URL 上传文件）
+
+        Args:
+            file_path: 文件路径（格式：user_{user_id}/{filename}）
+
+        Returns:
+            (是否成功, signed_url 或错误信息)
+        """
+        try:
+            # Supabase Python 客户端返回形如 {'signed_url': '...'} 或 {'signedUrl': '...'}
+            response = self.client.storage.from_(self.bucket_name).create_signed_upload_url(file_path)
+            signed_url = (
+                response.get("signed_url")
+                or response.get("signedUrl")
+                or response.get("url")
+            )
+            if not signed_url:
+                raise ValueError(f"无效的签名上传 URL 响应: {response}")
+            logger.info(f"[Supabase Storage] 创建签名上传 URL 成功: {file_path}")
+            return True, signed_url
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"[Supabase Storage] 创建签名上传 URL 失败: {file_path}, 错误: {error_msg}")
+            return False, error_msg
     
     def _upload_large_file_tus(self, file_data: bytes, file_path: str, content_type: str) -> Tuple[bool, str]:
         """

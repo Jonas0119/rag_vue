@@ -1,6 +1,6 @@
 """
 RAG Service FastAPI 应用主入口
-启动时预加载 Embedding 和 Rerank 模型（从ModelScope下载）
+启动时预加载 Embedding、Rerank 模型以及向量库 / 存储等依赖
 """
 import logging
 import os
@@ -33,41 +33,97 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期管理 - 启动时预加载模型"""
-    # 启动时执行
+    """
+    应用生命周期管理 - 启动时预加载核心依赖
+    
+    - Embedding 模型
+    - Rerank 模型（可选）
+    - 向量库客户端
+    - Supabase Storage（云存储模式）
+    - 文本分块 / 清洗工具（轻量预热）
+    """
     logger.info("🚀 RAG Service 启动中...")
-    
-    # 预加载 Embedding 模型（从ModelScope下载）
+
+    warmup_status = {
+        "embedding": False,
+        "reranker": False,
+        "vector_store": False,
+        "supabase_storage": False,
+        "text_splitter": False,
+    }
+
+    # 预加载 Embedding 模型（从 ModelScope / HuggingFace 下载）
     try:
-        logger.info(f"📥 开始预加载 Embedding 模型: {config.EMBEDDING_MODEL} (source={config.MODEL_DOWNLOAD_SOURCE})")
+        logger.info(
+            f"📥 开始预加载 Embedding 模型: {config.EMBEDDING_MODEL} "
+            f"(source={config.MODEL_DOWNLOAD_SOURCE})"
+        )
         from rag_service.services.vector_store_service import get_vector_store_service
+
         vector_service = get_vector_store_service()
-        # 等待模型加载完成（最多等待5分钟）
+        # 等待模型加载完成（最多等待 5 分钟）
         if vector_service._ensure_embeddings_loaded(timeout=300.0):
-            logger.info("✅ Embedding 模型加载完成")
+            warmup_status["embedding"] = True
+            warmup_status["vector_store"] = True
+            logger.info("✅ Embedding 模型加载完成，向量库客户端可用")
         else:
-            logger.warning("⚠️ Embedding 模型加载超时，将在首次使用时加载")
+            logger.warning("⚠️ Embedding 模型加载超时，将在首次请求时懒加载")
     except Exception as e:
-        logger.error(f"❌ Embedding 模型加载失败: {str(e)}", exc_info=True)
+        logger.error(f"❌ Embedding / 向量库预热失败: {str(e)}", exc_info=True)
         logger.warning("⚠️ 将在首次使用时尝试加载")
-    
-    # 预加载 Rerank 模型（从ModelScope下载，如果启用）
+
+    # 预加载 Rerank 模型（如果启用）
     if config.USE_RERANKER:
         try:
-            logger.info(f"📥 开始预加载 Rerank 模型: {config.RERANKER_MODEL} (source={config.MODEL_DOWNLOAD_SOURCE})")
+            logger.info(
+                f"📥 开始预加载 Rerank 模型: {config.RERANKER_MODEL} "
+                f"(source={config.MODEL_DOWNLOAD_SOURCE})"
+            )
             from rag_service.services.reranker import CrossEncoderReranker
-            reranker = CrossEncoderReranker()
+
+            _ = CrossEncoderReranker()
+            warmup_status["reranker"] = True
             logger.info("✅ Rerank 模型加载完成")
         except Exception as e:
             logger.error(f"❌ Rerank 模型加载失败: {str(e)}", exc_info=True)
             logger.warning("⚠️ 将在首次使用时尝试加载")
     else:
         logger.info("ℹ️ Reranker 未启用，跳过模型加载")
-    
+
+    # 预热 Supabase Storage（云存储模式）
+    if config.STORAGE_MODE == "cloud":
+        try:
+            from rag_service.utils.supabase_storage import get_supabase_storage
+
+            storage = get_supabase_storage()
+            if storage is not None:
+                warmup_status["supabase_storage"] = True
+                logger.info("✅ SupabaseStorage 初始化完成")
+            else:
+                logger.warning("⚠️ SupabaseStorage 未启用或配置不完整，跳过预热")
+        except Exception as e:
+            logger.error(f"❌ SupabaseStorage 预热失败: {str(e)}", exc_info=True)
+    else:
+        logger.info("ℹ️ STORAGE_MODE!=cloud，跳过 SupabaseStorage 预热")
+
+    # 预热文本分块 / 父子分块等工具（主要是导入模块，避免首次请求才导入）
+    try:
+        # 仅导入模块即可触发内部正则 / 类的加载，避免首次使用时的 import 开销
+        import rag_service.utils.text_splitter  # noqa: F401
+        import rag_service.utils.parent_child_splitter  # noqa: F401
+
+        warmup_status["text_splitter"] = True
+        logger.info("✅ 文本分块 / 父子分块工具模块导入完成")
+    except Exception as e:
+        logger.warning(f"⚠️ 文本分块工具预热失败（不影响服务启动）: {e}", exc_info=True)
+
     logger.info("✅ RAG Service 启动完成")
-    
+
+    # 将预热状态挂到 app.state 便于健康检查使用
+    app.state.warmup_status = warmup_status
+
     yield
-    
+
     # 关闭时执行
     logger.info("🛑 RAG Service 关闭中...")
 
@@ -126,15 +182,25 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """健康检查"""
-    from rag_service.services.vector_store_service import get_vector_store_service
-    vector_service = get_vector_store_service()
+    """
+    健康检查
     
+    返回 RAG Service 自身状态、模型 / 向量库 / 存储等依赖的健康信息。
+    """
+    from rag_service.services.vector_store_service import get_vector_store_service
+
+    vector_service = get_vector_store_service()
+
+    # 读取启动阶段的预热结果（如果存在）
+    warmup_status = getattr(app.state, "warmup_status", {})
+
     return {
         "status": "healthy",
         "embedding_loaded": vector_service.is_embeddings_ready(),
         "embedding_model": config.EMBEDDING_MODEL,
         "reranker_enabled": config.USE_RERANKER,
+        "storage_mode": config.STORAGE_MODE,
+        "warmup": warmup_status,
     }
 
 

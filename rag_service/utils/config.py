@@ -74,7 +74,8 @@ class Config:
     DATA_ROOT_DIR = os.getenv("DATA_ROOT_DIR", "data")
     USER_DATA_DIR = os.getenv("USER_DATA_DIR", "data/users")
     CHROMA_DB_DIR = os.getenv("CHROMA_DB_DIR", "data/chroma")
-    MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 20 * 1024 * 1024))  # 20MB
+    # 默认最大文件大小：30MB，可通过环境变量 MAX_FILE_SIZE 覆盖
+    MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 30 * 1024 * 1024))  # 30MB
     
     # RAG 配置（中文书籍优化）
     CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", 1000))  # 从 800 调整为 1000，更适合中文
